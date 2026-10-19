@@ -675,6 +675,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return NSImage(systemSymbolName: name, accessibilityDescription: "静音")
     }
 
+    /// 按当前默认设备刷新音量条的数值/图标/可用状态
+    private func refreshVolumeRow() {
+        let dev = defaultDevice(isInputMode)
+        let vol = getVolume(dev, input: isInputMode)
+        let muted = getMute(dev, input: isInputMode) ?? false
+        let canVol = (vol != nil)
+        volSlider?.doubleValue = Double(vol ?? 0)
+        volSlider?.isEnabled = canVol
+        if let pct = volSlider?.superview?.viewWithTag(99) as? NSTextField {
+            pct.stringValue = canVol ? "\(Int(((vol ?? 0) * 100).rounded()))%" : "—"
+            pct.textColor = canVol ? .secondaryLabelColor : .tertiaryLabelColor
+        }
+        volIcon?.isEnabled = canVol
+        volIcon?.image = volIconImage(muted: muted)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        volIcon?.contentTintColor = !canVol ? .tertiaryLabelColor
+                                 : (muted ? .controlAccentColor : .secondaryLabelColor)
+    }
+
     @objc func volumeChanged(_ sender: NSSlider) {
         let dev = defaultDevice(isInputMode)
         setVolume(dev, Float(sender.doubleValue), input: isInputMode)
@@ -739,6 +758,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let v = item.view as? RowView else { continue }
             v.title = rowTitle(v.dev, current: v.dev.isInput ? curIn : curOut)
         }
+        refreshVolumeRow()      // 音量条跟着切到新设备的音量
     }
 
     @objc func selectDevice(_ sender: NSMenuItem) {
