@@ -415,6 +415,44 @@ func panelHint(index: Int, isInput: Bool) -> String {
     }
 }
 
+// MARK: - 自绘菜单行（用 NSMenuItem.view，点击不关闭菜单）
+
+final class RowView: NSView {
+    var title: NSAttributedString { didSet { needsDisplay = true } }
+    let dev: AudioDev
+    let onClick: () -> Void
+    private var hover = false { didSet { needsDisplay = true } }
+
+    init(dev: AudioDev, title: NSAttributedString, onClick: @escaping () -> Void) {
+        self.dev = dev
+        self.title = title
+        self.onClick = onClick
+        super.init(frame: .zero)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for t in trackingAreas { removeTrackingArea(t) }
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+    override func mouseEntered(with e: NSEvent) { hover = true }
+    override func mouseExited(with e: NSEvent)  { hover = false }
+    override func mouseDown(with e: NSEvent)    { onClick() }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hover {
+            NSColor.controlAccentColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
+        }
+        title.draw(at: NSPoint(x: 0, y: (bounds.height - title.size().height) / 2))
+    }
+}
+
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -670,20 +708,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func deviceItem(_ d: AudioDev, current: AudioDeviceID) -> NSMenuItem {
-        let item = NSMenuItem(title: d.name, action: #selector(selectDevice(_:)), keyEquivalent: "")
-        item.target = self
-        item.representedObject = ["id": Int(d.id), "input": d.isInput]
-        // 选中标记用标题里的实心圆点（见 alignedTitle 的 dot 参数）
-        let active = (d.id == current)
-        item.state = .off
-        item.image = nil
-
-        if let c = columns(for: d) {
-            item.attributedTitle = alignedTitle(c.0, c.1, c.2, c.3, dot: active)
+        let item = NSMenuItem()
+        let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
+            self?.selectDeviceDirect(d)
         }
-        let hint = panelHint(index: d.index, isInput: d.isInput)
-        item.toolTip = (hint.isEmpty ? "" : hint + "　") + d.name
+        v.frame = NSRect(x: 0, y: 0, width: 196, height: 20)
+        item.view = v
+        item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
+    }
+
+    /// 一行的标题（含圆点）
+    private func rowTitle(_ d: AudioDev, current: AudioDeviceID) -> NSAttributedString {
+        let active = (d.id == current)
+        if let c = columns(for: d) {
+            return alignedTitle(c.0, c.1, c.2, c.3, dot: active)
+        }
+        return plainTitle(d.name, dot: active)
+    }
+
+    /// 点行：切设备 + 就地刷新所有行的圆点（不重建菜单 ⇒ 菜单不关闭）
+    private func selectDeviceDirect(_ d: AudioDev) {
+        _ = setDefault(d.id, input: d.isInput)
+        isInputMode = d.isInput
+        let curOut = defaultDevice(false)
+        let curIn = defaultDevice(true)
+        for item in menu.items {
+            guard let v = item.view as? RowView else { continue }
+            v.title = rowTitle(v.dev, current: v.dev.isInput ? curIn : curOut)
+        }
     }
 
     @objc func selectDevice(_ sender: NSMenuItem) {
