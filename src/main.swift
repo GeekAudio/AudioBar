@@ -449,7 +449,9 @@ final class RowView: NSView {
             NSColor.controlAccentColor.withAlphaComponent(0.08).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
         }
-        title.draw(at: NSPoint(x: 0, y: (bounds.height - title.size().height) / 2))
+        // ★ 普通菜单项的文字有 ~14pt 左边距（勾选槽），view 项没有。
+        //   这里补上同样的偏移，才能和「输出设备」标题、底部三项对齐。
+        title.draw(at: NSPoint(x: 14, y: (bounds.height - title.size().height) / 2))
     }
 }
 
