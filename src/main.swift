@@ -450,7 +450,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let muted = getMute(dev, input: isInputMode) ?? false
         let canVol = (vol != nil)
 
-        let btn = NSButton(frame: NSRect(x: 0, y: (h - 22) / 2, width: 22, height: 22))
+        // 左右各留 inset，图标 / 滑块 / 百分比之间的间隙统一为 gap
+        let inset: CGFloat = 8
+        let gap: CGFloat = 8
+        let btn = NSButton(frame: NSRect(x: inset, y: (h - 22) / 2, width: 22, height: 22))
         btn.isBordered = false
         btn.imagePosition = .imageOnly
         btn.image = volIconImage(muted: muted)?
@@ -464,10 +467,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         volIcon = btn
 
         let pctW: CGFloat = 36
-        let pctX = w - pctW - 4
-        let sx: CGFloat = 28
+        let pctX = w - inset - pctW
+        let sx = inset + 22 + gap
         let slider = NSSlider(frame: NSRect(x: sx, y: (h - 18) / 2,
-                                            width: max(20, pctX - 8 - sx), height: 18))
+                                            width: max(20, pctX - gap - sx), height: 18))
         slider.minValue = 0
         slider.maxValue = 1
         slider.isContinuous = true
