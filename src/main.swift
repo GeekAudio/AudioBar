@@ -470,7 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
     private func volumeItem() -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 220, h: CGFloat = 30
+        let w: CGFloat = 196, h: CGFloat = 30     // 组件整体收窄（原 220）
         let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
@@ -478,8 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let canVol = (vol != nil)
 
         // 左右各留 inset，图标 / 滑块 / 百分比之间的间隙统一为 gap
-        let inset: CGFloat = 4
-        let gap: CGFloat = 4
+        let inset: CGFloat = 8
+        let gap: CGFloat = 8
         let btn = NSButton(frame: NSRect(x: inset, y: (h - 22) / 2, width: 22, height: 22))
         btn.isBordered = false
         btn.imagePosition = .imageOnly
