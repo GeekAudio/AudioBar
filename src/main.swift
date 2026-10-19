@@ -155,7 +155,7 @@ func panelColumns(index: Int, isInput: Bool) -> (String, String, String, String)
         switch index {
         case 3: return ("线路输出", "→", "LINE", "绿")
         case 4: return ("前置耳机", "→", "HP", "绿")
-        case 5: return ("光纤输出", "→", "SPDIF", "光纤")
+        case 5: return ("光纤输出", "→", "SPDIF", "黑")
         default: return nil
         }
     }
