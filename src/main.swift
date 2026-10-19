@@ -389,25 +389,27 @@ func connectorIcon(_ conn: String, color: NSColor, size: CGFloat = 13) -> NSAttr
         color.set()
         if conn == "SPDIF" {
             // 方口：外框 + 内芯
-            let outer = rect.insetBy(dx: 1.2, dy: 1.2)
+            let outer = rect.insetBy(dx: 2.0, dy: 2.0)
             let p = NSBezierPath(roundedRect: outer, xRadius: 1.5, yRadius: 1.5)
-            p.lineWidth = 2.0
+            p.lineWidth = 1.6
             p.stroke()
-            let inner = rect.insetBy(dx: 4.2, dy: 4.2)
+            let inner = rect.insetBy(dx: 5.0, dy: 5.0)
             NSBezierPath(roundedRect: inner, xRadius: 0.8, yRadius: 0.8).fill()
         } else {
             // 3.5mm 圆孔：外环 + 内芯
             let outer = rect.insetBy(dx: 1.4, dy: 1.4)
             let p = NSBezierPath(ovalIn: outer)
-            p.lineWidth = 2.0
+            p.lineWidth = 1.6
             p.stroke()
-            let inner = rect.insetBy(dx: 4.4, dy: 4.4)
+            let inner = rect.insetBy(dx: 5.0, dy: 5.0)
             NSBezierPath(ovalIn: inner).fill()
         }
         return true
     }
     let att = NSTextAttachment()
     att.image = img
+    // 图标默认坐在基线上，视觉偏高，整体下移 2pt
+    att.bounds = CGRect(x: 0, y: -2, width: img.size.width, height: img.size.height)
     return NSAttributedString(attachment: att)
 }
 
