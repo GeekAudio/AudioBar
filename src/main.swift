@@ -335,6 +335,7 @@ func jackColor(_ c: String) -> NSColor {
     case "橙":   return NSColor(srgbRed: 0.85, green: 0.50, blue: 0.15, alpha: 1)
     case "黄":   return NSColor(srgbRed: 0.75, green: 0.65, blue: 0.15, alpha: 1)
     case "紫":   return NSColor(srgbRed: 0.55, green: 0.35, blue: 0.75, alpha: 1)
+    case "光纤": return NSColor.black          // 光纤没有插孔颜色，统一用黑
     default:    return NSColor.secondaryLabelColor
     }
 }
@@ -347,6 +348,12 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
+    // 普通菜单项文字起点比行视图靠左 4pt，用零宽字符 + kern 补 4pt，圆点才能和行视图对齐
+    s.append(NSAttributedString(string: "\u{200C}", attributes: [
+        .font: NSFont.systemFont(ofSize: 8),
+        .kern: 4,
+        .foregroundColor: NSColor.clear,
+        .paragraphStyle: style]))
     s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
         .font: NSFont.systemFont(ofSize: 8),
         .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
