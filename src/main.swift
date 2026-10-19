@@ -733,7 +733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 196, height: 20)
+        v.frame = NSRect(x: 0, y: 0, width: 196, height: 22)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
