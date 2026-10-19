@@ -354,11 +354,9 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
         .kern: 4,
         .foregroundColor: NSColor.clear,
         .paragraphStyle: style]))
-    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
-        .font: NSFont.systemFont(ofSize: 8),
-        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
-        .baselineOffset: 2,
-        .paragraphStyle: style]))
+    // 左侧圆点位置放接口图标：选中=实色，未选中=同色 30% 透明
+    let baseColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
+    s.append(connectorIcon(conn, color: dot ? baseColor : baseColor.withAlphaComponent(0.28)))
     s.append(NSAttributedString(string: "\t" + text, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
@@ -416,7 +414,7 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
                   dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
     // 四列：圆点 / 名字 / 方向符号 / 接口名 / 颜色
-    style.tabStops = [NSTextTab(textAlignment: .left, location: 14),
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 16),
                       NSTextTab(textAlignment: .left, location: kArrowX),
                       NSTextTab(textAlignment: .left, location: kConnX),
                       NSTextTab(textAlignment: .right, location: kColorX)]   // 右对齐，右侧留白和左边对称
@@ -426,11 +424,9 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
     // 圆点画在标题最前面（不用 item.image，避免图标槽造成缩进）
     // ★ 每行都以一个字符开头再 tab：行首直接写 tab 时 AppKit 会吞掉，
     //   导致选中行(有●)和未选中行(无●)的名字起点不一致。
-    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
-        .font: NSFont.systemFont(ofSize: 8),
-        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
-        .baselineOffset: 2,
-        .paragraphStyle: style]))
+    // 左侧圆点位置放接口图标：选中=实色，未选中=同色 30% 透明
+    let baseColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
+    s.append(connectorIcon(conn, color: dot ? baseColor : baseColor.withAlphaComponent(0.28)))
     s.append(NSAttributedString(string: "\t" + cn, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
@@ -444,9 +440,10 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
     // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
-    let iconColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
-    s.append(NSAttributedString(string: "\t", attributes: [.paragraphStyle: style]))
-    s.append(connectorIcon(conn, color: iconColor))
+    s.append(NSAttributedString(string: "\t" + color, attributes: [
+        .font: NSFont.systemFont(ofSize: 12),
+        .foregroundColor: baseColor,
+        .paragraphStyle: style]))
     return s
 }
 
