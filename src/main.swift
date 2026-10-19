@@ -321,7 +321,7 @@ func sortRank(index: Int, isInput: Bool) -> Int {
 let kNameX: CGFloat  = 12      // 名字列（圆点之后）
 let kArrowX: CGFloat = 66
 let kConnX: CGFloat  = 84
-let kColorX: CGFloat = 128
+let kColorX: CGFloat = 170     // 颜色列右对齐位置（标题坐标系，行宽 196 - 左侧 14 - 右侧 12）
 
 /// 颜色字用真实颜色渲染，不用读就知道是哪个口
 func jackColor(_ c: String) -> NSColor {
@@ -366,7 +366,7 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
     style.tabStops = [NSTextTab(textAlignment: .left, location: kNameX),
                       NSTextTab(textAlignment: .left, location: kArrowX),
                       NSTextTab(textAlignment: .left, location: kConnX),
-                      NSTextTab(textAlignment: .left, location: kColorX)]
+                      NSTextTab(textAlignment: .right, location: kColorX)]   // 右对齐，右侧留白和左边对称
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
