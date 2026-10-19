@@ -1,6 +1,7 @@
 import Cocoa
 import CoreAudio
 import ServiceManagement
+import IOKit
 
 // MARK: - CoreAudio 辅助
 
@@ -160,6 +161,73 @@ func panelColumns(index: Int, isInput: Bool) -> (String, String, String, String)
     }
 }
 
+// MARK: - codec 引脚配置（取颜色用，Hackintool 同款做法）
+
+/// 从 IORegistry 的 AppleHDAController / HDAConfigDefault 读整份 pin config。
+/// 一次属性读取即可，不用 alc-verb 逐节点发 verb。
+/// 每个 UInt32 里：bit31=有插孔、bit20-23=device type、bit12-15=颜色
+/// 返回 [(deviceType, 颜色名)]，顺序即节点 nid 升序
+func codecPinColors() -> [(Int, String)] {
+    var out: [(Int, String)] = []
+    guard let match = IOServiceMatching("AppleHDAController") else { return out }
+    var iter: io_iterator_t = 0
+    guard IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter) == KERN_SUCCESS else { return out }
+    defer { IOObjectRelease(iter) }
+
+    var svc = IOIteratorNext(iter)
+    while svc != 0 {
+        if let d = IORegistryEntryCreateCFProperty(svc, "HDAConfigDefault" as CFString,
+                                                   kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? Data {
+            let words = d.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
+            for v in words {
+                guard (v & 0x8000_0000) != 0 else { continue }       // 无插孔
+                let devType = Int((v >> 20) & 0xF)
+                let color = colorName(Int((v >> 12) & 0xF))
+                guard !color.isEmpty else { continue }
+                out.append((devType, color))
+            }
+            if !out.isEmpty { break }                                 // 只用第一个 codec
+        }
+        IOObjectRelease(svc)
+        svc = IOIteratorNext(iter)
+    }
+    return out
+}
+
+/// pin config 的颜色码 → 中文
+func colorName(_ c: Int) -> String {
+    switch c {
+    case 1: return "黑"
+    case 2: return "灰"
+    case 3: return "蓝"
+    case 4: return "绿"
+    case 5: return "红"
+    case 6: return "橙"
+    case 7: return "黄"
+    case 8: return "紫"
+    case 9: return "粉"
+    default: return ""
+    }
+}
+
+/// 系统设备名 → HDA device type（用于和 codec 引脚配对）
+func hdaDevType(_ name: String, isInput: Bool) -> Int? {
+    let n = name.lowercased()
+    if isInput {
+        if n.contains("digital input") || n.contains("spdif") { return 4 }
+        if n.contains("line input") || n.contains("linein")   { return 8 }
+        if n.contains("microphone") || n.contains("mic")      { return 0xA }
+        return nil
+    } else {
+        if n.contains("digital output") || n.contains("spdif") { return 4 }
+        if n.contains("headphone")                             { return 2 }
+        if n.contains("line output") || n.contains("lineout")  { return 0 }
+        if n.contains("speaker")                               { return 1 }
+        return nil
+    }
+}
+
 /// 通用兜底：本机索引表没命中时，从 AppleHDA 给的系统设备名推导
 /// 设备名本身携带类型（Built-in Line Output / Headphone / Microphone…），
 /// 与 CoreAudio 枚举天然一一对应，不需要跨层映射 ⇒ 换任何机器都能显示
@@ -168,18 +236,37 @@ func derivedColumns(name: String, isInput: Bool) -> (String, String, String, Str
     let n = name.lowercased()
     func has(_ k: String) -> Bool { n.contains(k) }
 
+    let color = pinColor(for: name, isInput: isInput)
+
     if isInput {
-        if has("digital input") || has("spdif") { return ("数字输入", "←", "SPDIF", "") }
+        if has("digital input") || has("spdif") { return ("数字输入", "←", "SPDIF", color) }
         if has("line input") || has("linein")   { return ("线路输入", "←", "LINE",  "") }
         if has("microphone") || has("mic")      { return ("话筒",     "←", "MIC",   "") }
         return nil
     } else {
-        if has("digital output") || has("spdif") { return ("光纤输出", "→", "SPDIF", "") }
+        if has("digital output") || has("spdif") { return ("光纤输出", "→", "SPDIF", color) }
         if has("headphone")                      { return ("耳机",     "→", "HP",    "") }
         if has("line output") || has("lineout")  { return ("线路输出", "→", "LINE",  "") }
         if has("speaker")                        { return ("扬声器",   "→", "SPK",   "") }
         return nil
     }
+}
+
+/// 给某个 CoreAudio 设备找它的插孔颜色。
+/// 只做「同 device type 内按顺序配对」，并且**数量必须对得上**才采用——
+/// 对不上就返回空，避免颜色张冠李戴（比没有更糟）。
+func pinColor(for name: String, isInput: Bool) -> String {
+    guard let dt = hdaDevType(name, isInput: isInput) else { return "" }
+    let pins = codecPinColors().filter { $0.0 == dt }.map { $0.1 }
+    guard !pins.isEmpty else { return "" }
+
+    // 同一 device type 的 CoreAudio 设备（按显示顺序）
+    let sameType = allAudioDevices()
+        .filter { $0.isInput == isInput && hdaDevType($0.name, isInput: isInput) == dt }
+        .sorted { sortRank(index: $0.index, isInput: isInput) < sortRank(index: $1.index, isInput: isInput) }
+    guard sameType.count == pins.count,
+          let idx = sameType.firstIndex(where: { $0.name == name }) else { return "" }
+    return pins[idx]
 }
 
 /// 先查本机精确表，查不到再走通用推导
@@ -228,6 +315,12 @@ func jackColor(_ c: String) -> NSColor {
     case "绿":   return NSColor(srgbRed: 0.13, green: 0.62, blue: 0.24, alpha: 1)
     case "粉":   return NSColor(srgbRed: 0.85, green: 0.28, blue: 0.55, alpha: 1)
     case "蓝":   return NSColor(srgbRed: 0.11, green: 0.44, blue: 0.85, alpha: 1)
+    case "黑":   return NSColor(srgbRed: 0.25, green: 0.25, blue: 0.27, alpha: 1)
+    case "灰":   return NSColor(srgbRed: 0.55, green: 0.55, blue: 0.57, alpha: 1)
+    case "红":   return NSColor(srgbRed: 0.80, green: 0.25, blue: 0.25, alpha: 1)
+    case "橙":   return NSColor(srgbRed: 0.85, green: 0.50, blue: 0.15, alpha: 1)
+    case "黄":   return NSColor(srgbRed: 0.75, green: 0.65, blue: 0.15, alpha: 1)
+    case "紫":   return NSColor(srgbRed: 0.55, green: 0.35, blue: 0.75, alpha: 1)
     default:    return NSColor.secondaryLabelColor
     }
 }
@@ -689,6 +782,20 @@ if CommandLine.arguments.contains("--disable-autostart") {
     guard #available(macOS 13.0, *) else { print("需要 macOS 13+"); exit(1) }
     do { try SMAppService.mainApp.unregister(); print("开机自启动已关闭") }
     catch { print("关闭失败: \(error.localizedDescription)"); exit(1) }
+    exit(0)
+}
+
+// --pins：打印 codec 引脚颜色与推导结果（验证取色是否和硬编码表一致）
+if CommandLine.arguments.contains("--pins") {
+    print("codec 引脚 (deviceType, 颜色)：")
+    for (t, c) in codecPinColors() { print("  type=\(t)  \(c)") }
+    print("\n逐设备推导：")
+    for d in allAudioDevices() {
+        let derived = derivedColumns(name: d.name, isInput: d.isInput)
+        let exact = panelColumns(index: d.index, isInput: d.isInput)
+        print("  \(d.isInput ? "输入" : "输出") idx=\(d.index)  \(d.name)")
+        print("     精确表颜色 = \(exact?.3 ?? "-")   推导颜色 = \(derived?.3 ?? "-")")
+    }
     exit(0)
 }
 
