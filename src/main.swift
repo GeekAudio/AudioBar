@@ -169,29 +169,43 @@ func panelColumns(index: Int, isInput: Bool) -> (String, String, String, String)
 /// 返回 [(deviceType, 颜色名)]，顺序即节点 nid 升序
 func codecPinColors() -> [(Int, String)] {
     var out: [(Int, String)] = []
+    // 在控制器及其所有子节点里找 HDAConfigDefault（属性挂在 codec 子节点上）
+    func scan(_ entry: io_registry_entry_t, depth: Int) {
+        if out.isEmpty,
+           let d = IORegistryEntryCreateCFProperty(entry, "HDAConfigDefault" as CFString,
+                                                   kCFAllocatorDefault, 0)?
+            .takeRetainedValue() as? Data, d.count >= 4 {
+            let words = d.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
+            for v in words {
+                guard (v & 0x8000_0000) != 0 else { continue }
+                let color = colorName(Int((v >> 12) & 0xF))
+                guard !color.isEmpty else { continue }
+                out.append((Int((v >> 20) & 0xF), color))
+            }
+        }
+        guard depth < 3 else { return }
+        var child: io_iterator_t = 0
+        if IORegistryEntryGetChildIterator(entry, kIOServicePlane, &child) == KERN_SUCCESS {
+            var c = IOIteratorNext(child)
+            while c != 0 {
+                scan(c, depth: depth + 1)
+                IOObjectRelease(c)
+                c = IOIteratorNext(child)
+            }
+            IOObjectRelease(child)
+        }
+    }
+
     guard let match = IOServiceMatching("AppleHDAController") else { return out }
     var iter: io_iterator_t = 0
     guard IOServiceGetMatchingServices(kIOMainPortDefault, match, &iter) == KERN_SUCCESS else { return out }
-    defer { IOObjectRelease(iter) }
-
     var svc = IOIteratorNext(iter)
     while svc != 0 {
-        if let d = IORegistryEntryCreateCFProperty(svc, "HDAConfigDefault" as CFString,
-                                                   kCFAllocatorDefault, 0)?
-            .takeRetainedValue() as? Data {
-            let words = d.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
-            for v in words {
-                guard (v & 0x8000_0000) != 0 else { continue }       // 无插孔
-                let devType = Int((v >> 20) & 0xF)
-                let color = colorName(Int((v >> 12) & 0xF))
-                guard !color.isEmpty else { continue }
-                out.append((devType, color))
-            }
-            if !out.isEmpty { break }                                 // 只用第一个 codec
-        }
+        scan(svc, depth: 0)
         IOObjectRelease(svc)
         svc = IOIteratorNext(iter)
     }
+    IOObjectRelease(iter)
     return out
 }
 
@@ -571,7 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let canVol = (vol != nil)
 
         // 左右各留 inset，图标 / 滑块 / 百分比之间的间隙统一为 gap
-        let inset: CGFloat = 8
+        let inset: CGFloat = 14    // 图标和百分比整体往内收
         let gap: CGFloat = 8
         let btn = NSButton(frame: NSRect(x: inset, y: (h - 22) / 2, width: 22, height: 22))
         btn.isBordered = false
