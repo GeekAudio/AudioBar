@@ -344,7 +344,7 @@ func jackColor(_ c: String) -> NSColor {
 /// 「圆点槽 + tab 到 kNameX」，这样它们和设备行的中文列严格对齐
 func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
-    style.tabStops = [NSTextTab(textAlignment: .left, location: 14)]
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 18)]
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
@@ -366,68 +366,26 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     return s
 }
 
-/// 把 SF Symbol 染成指定颜色并包成文本附件（用于在菜单标题里嵌图标）
-func symbolAttachment(_ name: String, color: NSColor, pointSize: CGFloat = 11) -> NSAttributedString? {
-    guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular))
-    else { return nil }
-    let tinted = NSImage(size: img.size, flipped: false) { rect in
-        img.draw(in: rect)
-        color.set()
-        rect.fill(using: .sourceIn)
-        return true
-    }
-    let att = NSTextAttachment()
-    att.image = tinted
-    return NSAttributedString(attachment: att)
-}
-
-/// 自绘 IO 接口图形（扁平风格）
-/// 3.5mm 插孔 = 外环 + 内点；光纤方口 = 外方框 + 内方点
-func connectorIcon(_ conn: String, color: NSColor, size: CGFloat = 12) -> NSAttributedString {
-    let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
-        color.set()
-        if conn == "SPDIF" {
-            // 方口：外框 + 内芯
-            let outer = rect.insetBy(dx: 1.2, dy: 1.2)
-            let p = NSBezierPath(roundedRect: outer, xRadius: 1.5, yRadius: 1.5)
-            p.lineWidth = 1.3
-            p.stroke()
-            let inner = rect.insetBy(dx: 4.6, dy: 4.6)
-            NSBezierPath(roundedRect: inner, xRadius: 0.8, yRadius: 0.8).fill()
-        } else {
-            // 3.5mm 圆孔：外环 + 内芯
-            let outer = rect.insetBy(dx: 1.4, dy: 1.4)
-            let p = NSBezierPath(ovalIn: outer)
-            p.lineWidth = 1.3
-            p.stroke()
-            let inner = rect.insetBy(dx: 4.8, dy: 4.8)
-            NSBezierPath(ovalIn: inner).fill()
-        }
-        return true
-    }
-    let att = NSTextAttachment()
-    att.image = img
-    return NSAttributedString(attachment: att)
-}
-
 /// 中文 13pt 主色 / 方向符号 11.5pt 三级灰 / 接口名 11.5pt 次要灰 / 颜色字用插孔真实颜色
 func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String,
                   dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
     // 四列：圆点 / 名字 / 方向符号 / 接口名 / 颜色
-    style.tabStops = [NSTextTab(textAlignment: .left, location: 16),
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 14),
                       NSTextTab(textAlignment: .left, location: kArrowX),
-                      NSTextTab(textAlignment: .left, location: kConnX)]   // 右对齐，右侧留白和左边对称
+                      NSTextTab(textAlignment: .left, location: kConnX),
+                      NSTextTab(textAlignment: .right, location: kColorX)]   // 右对齐，右侧留白和左边对称
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
     // 圆点画在标题最前面（不用 item.image，避免图标槽造成缩进）
     // ★ 每行都以一个字符开头再 tab：行首直接写 tab 时 AppKit 会吞掉，
     //   导致选中行(有●)和未选中行(无●)的名字起点不一致。
-    // 左侧圆点位置放接口图标：选中=实色，未选中=同色 30% 透明
-    let baseColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
-    s.append(connectorIcon(conn, color: dot ? baseColor : baseColor.withAlphaComponent(0.28)))
+    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
+        .font: NSFont.systemFont(ofSize: 8),
+        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .baselineOffset: 2,
+        .paragraphStyle: style]))
     s.append(NSAttributedString(string: "\t" + cn, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
@@ -440,7 +398,10 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .font: NSFont.systemFont(ofSize: 11.5),
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
-    // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
+    s.append(NSAttributedString(string: "\t" + color, attributes: [
+        .font: NSFont.systemFont(ofSize: 12),
+        .foregroundColor: jackColor(color),
+        .paragraphStyle: style]))
     return s
 }
 
@@ -499,7 +460,7 @@ final class RowView: NSView {
         }
         // ★ 普通菜单项的文字有 ~14pt 左边距（勾选槽），view 项没有。
         //   这里补上同样的偏移，才能和「输出设备」标题、底部三项对齐。
-        title.draw(at: NSPoint(x: 12, y: (bounds.height - title.size().height) / 2))
+        title.draw(at: NSPoint(x: 18, y: (bounds.height - title.size().height) / 2))
     }
 }
 
@@ -665,7 +626,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
     private func volumeItem() -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 149, h: CGFloat = 34     // 组件整体收窄（原 220）
+        let w: CGFloat = 196, h: CGFloat = 34     // 组件整体收窄（原 220）
         let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
@@ -782,7 +743,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 149, height: 26)   // 与系统菜单项高度一致
+        v.frame = NSRect(x: 0, y: 0, width: 196, height: 26)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
