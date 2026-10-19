@@ -318,9 +318,9 @@ func sortRank(index: Int, isInput: Bool) -> Int {
 //  128 = 颜色
 // ★ defaultTabInterval 必须是 0：设成非 0 会生成额外的隐式停靠位，
 //   把后面几列顶到画布外（实测宽度从 151 变成 264）
-let kNameX: CGFloat  = 18      // 名字列（左边距 14+18=32）
-let kArrowX: CGFloat = 72
-let kConnX: CGFloat  = 90
+let kNameX: CGFloat  = 14      // 名字列（靠近圆点，左边距 14+14=28）
+let kArrowX: CGFloat = 68
+let kConnX: CGFloat  = 86
 let kColorX: CGFloat = 164     // 颜色右对齐位置：右侧留白 18
 
 /// 颜色字用真实颜色渲染，不用读就知道是哪个口
