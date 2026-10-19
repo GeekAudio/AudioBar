@@ -142,6 +142,7 @@ func sortRank(index: Int, isInput: Bool) -> Int {
 //  128 = 颜色
 // ★ defaultTabInterval 必须是 0：设成非 0 会生成额外的隐式停靠位，
 //   把后面几列顶到画布外（实测宽度从 151 变成 264）
+let kNameX: CGFloat  = 12      // 名字列（圆点之后）
 let kArrowX: CGFloat = 66
 let kConnX: CGFloat  = 84
 let kColorX: CGFloat = 128
@@ -156,32 +157,26 @@ func jackColor(_ c: String) -> NSColor {
     }
 }
 
-/// 小圆点：用来标记当前设备（代替系统对号）
-func dotImage(diameter: CGFloat = 7, color: NSColor = .controlAccentColor) -> NSImage {
-    let img = NSImage(size: NSSize(width: diameter, height: diameter), flipped: false) { rect in
-        color.setFill()
-        NSBezierPath(ovalIn: rect.insetBy(dx: 0.5, dy: 0.5)).fill()
-        return true
-    }
-    img.isTemplate = false
-    return img
-}
-
-/// 全透明占位图：让所有菜单项的图标槽宽度一致，标题才不会左右错位
-func blankImage(size: CGFloat) -> NSImage {
-    NSImage(size: NSSize(width: size, height: size), flipped: false) { _ in true }
-}
-
 /// 中文 13pt 主色 / 方向符号 11.5pt 三级灰 / 接口名 11.5pt 次要灰 / 颜色字用插孔真实颜色
-func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String) -> NSAttributedString {
+func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String,
+                  dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
-    style.tabStops = [NSTextTab(textAlignment: .left, location: kArrowX),
+    // 四列：圆点 / 名字 / 方向符号 / 接口名 / 颜色
+    style.tabStops = [NSTextTab(textAlignment: .left, location: kNameX),
+                      NSTextTab(textAlignment: .left, location: kArrowX),
                       NSTextTab(textAlignment: .left, location: kConnX),
                       NSTextTab(textAlignment: .left, location: kColorX)]
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
-    s.append(NSAttributedString(string: cn, attributes: [
+    // 圆点画在标题最前面（不用 item.image，避免图标槽造成缩进）
+    if dot {
+        s.append(NSAttributedString(string: "●", attributes: [
+            .font: NSFont.systemFont(ofSize: 8),
+            .foregroundColor: NSColor.controlAccentColor,
+            .paragraphStyle: style]))
+    }
+    s.append(NSAttributedString(string: "\t" + cn, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
         .paragraphStyle: style]))
@@ -379,13 +374,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: d.name, action: #selector(selectDevice(_:)), keyEquivalent: "")
         item.target = self
         item.representedObject = ["id": Int(d.id), "input": d.isInput]
-        // 用实心小圆点代替系统对号；未选中的用透明占位，保证标题起点一致
+        // 选中标记用标题里的实心圆点（见 alignedTitle 的 dot 参数）
         let active = (d.id == current)
         item.state = .off
-        item.image = active ? dotImage() : blankImage(size: 7)
+        item.image = nil
 
         if let c = panelColumns(index: d.index, isInput: d.isInput) {
-            item.attributedTitle = alignedTitle(c.0, c.1, c.2, c.3)
+            item.attributedTitle = alignedTitle(c.0, c.1, c.2, c.3, dot: active)
         }
         let hint = panelHint(index: d.index, isInput: d.isInput)
         item.toolTip = (hint.isEmpty ? "" : hint + "　") + d.name
