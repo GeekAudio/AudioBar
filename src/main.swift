@@ -321,7 +321,7 @@ func sortRank(index: Int, isInput: Bool) -> Int {
 let kNameX: CGFloat  = 20      // 左边距 14+20=34
 let kArrowX: CGFloat = 74
 let kConnX: CGFloat  = 92
-let kColorX: CGFloat = 155     // 颜色右对齐：压缩接口名↔颜色间隙，右侧留白 27
+let kColorX: CGFloat = 151     // 颜色右对齐（行内坐标）：右侧留白 27
 
 /// 颜色字用真实颜色渲染，不用读就知道是哪个口
 func jackColor(_ c: String) -> NSColor {
@@ -343,7 +343,7 @@ func jackColor(_ c: String) -> NSColor {
 /// 「圆点槽 + tab 到 kNameX」，这样它们和设备行的中文列严格对齐
 func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
-    style.tabStops = [NSTextTab(textAlignment: .left, location: kNameX)]
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 18)]
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
@@ -364,7 +364,7 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
                   dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
     // 四列：圆点 / 名字 / 方向符号 / 接口名 / 颜色
-    style.tabStops = [NSTextTab(textAlignment: .left, location: kNameX),
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 14),
                       NSTextTab(textAlignment: .left, location: kArrowX),
                       NSTextTab(textAlignment: .left, location: kConnX),
                       NSTextTab(textAlignment: .right, location: kColorX)]   // 右对齐，右侧留白和左边对称
@@ -453,7 +453,7 @@ final class RowView: NSView {
         }
         // ★ 普通菜单项的文字有 ~14pt 左边距（勾选槽），view 项没有。
         //   这里补上同样的偏移，才能和「输出设备」标题、底部三项对齐。
-        title.draw(at: NSPoint(x: 14, y: (bounds.height - title.size().height) / 2))
+        title.draw(at: NSPoint(x: 18, y: (bounds.height - title.size().height) / 2))
     }
 }
 
