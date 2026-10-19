@@ -354,9 +354,11 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
         .kern: 4,
         .foregroundColor: NSColor.clear,
         .paragraphStyle: style]))
-    // 左侧圆点位置放接口图标：选中=实色，未选中=同色 30% 透明
-    let baseColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
-    s.append(connectorIcon(conn, color: dot ? baseColor : baseColor.withAlphaComponent(0.28)))
+    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
+        .font: NSFont.systemFont(ofSize: 8),
+        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .baselineOffset: 2,
+        .paragraphStyle: style]))
     s.append(NSAttributedString(string: "\t" + text, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
