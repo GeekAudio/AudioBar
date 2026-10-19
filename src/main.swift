@@ -84,6 +84,54 @@ func setDefault(_ dev: AudioDeviceID, input: Bool) -> Bool {
     return AudioObjectSetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, UInt32(MemoryLayout<AudioDeviceID>.size), &d) == noErr
 }
 
+// MARK: - 音量 / 静音
+
+func volumeAddress(_ dev: AudioDeviceID, input: Bool) -> AudioObjectPropertyAddress? {
+    let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+    for el in [kAudioObjectPropertyElementMain, 1] as [AudioObjectPropertyElement] {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                           mScope: scope, mElement: el)
+        if AudioObjectHasProperty(dev, &a) { return a }
+    }
+    return nil
+}
+
+func getVolume(_ dev: AudioDeviceID, input: Bool) -> Float? {
+    guard var a = volumeAddress(dev, input: input) else { return nil }
+    var v: Float32 = 0
+    var size = UInt32(MemoryLayout<Float32>.size)
+    return AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &v) == noErr ? v : nil
+}
+
+func setVolume(_ dev: AudioDeviceID, _ value: Float, input: Bool) {
+    guard var a = volumeAddress(dev, input: input) else { return }
+    var v = Float32(value)
+    AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<Float32>.size), &v)
+}
+
+func muteAddress(_ dev: AudioDeviceID, input: Bool) -> AudioObjectPropertyAddress? {
+    let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
+    for el in [kAudioObjectPropertyElementMain, 1] as [AudioObjectPropertyElement] {
+        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyMute,
+                                           mScope: scope, mElement: el)
+        if AudioObjectHasProperty(dev, &a) { return a }
+    }
+    return nil
+}
+
+func getMute(_ dev: AudioDeviceID, input: Bool) -> Bool? {
+    guard var a = muteAddress(dev, input: input) else { return nil }
+    var v: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    return AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &v) == noErr ? (v != 0) : nil
+}
+
+func setMute(_ dev: AudioDeviceID, _ muted: Bool, input: Bool) {
+    guard var a = muteAddress(dev, input: input) else { return }
+    var v: UInt32 = muted ? 1 : 0
+    AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<UInt32>.size), &v)
+}
+
 // MARK: - 面板丝印映射（按 codec 引擎序号）
 
 /// 本机 ALC897：输入 0=0x18 后置粉、1=0x19 前置粉、2=0x1a 蓝；
@@ -240,6 +288,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let menu = NSMenu()
     var vrefTimer: Timer?
 
+    /// true = 音量条控制输入（麦克风图标），false = 控制输出（喇叭图标）
+    var isInputMode: Bool = UserDefaults.standard.bool(forKey: "AudioBar.inputMode") {
+        didSet { UserDefaults.standard.set(isInputMode, forKey: "AudioBar.inputMode") }
+    }
+    weak var volSlider: NSSlider?
+    weak var volIcon: NSButton?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = makeStatusItem()
         menu.delegate = self
@@ -350,6 +405,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let curOut = defaultDevice(false)
         let curIn = defaultDevice(true)
 
+        menu.addItem(volumeItem())
+        menu.addItem(.separator())
         menu.addItem(header("输出设备"))
         for d in devs.filter({ !$0.isInput }).sorted(by: { sortRank(index: $0.index, isInput: false) < sortRank(index: $1.index, isInput: false) }) {
             menu.addItem(deviceItem(d, current: curOut))
@@ -383,6 +440,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quit)
     }
 
+    /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
+    private func volumeItem() -> NSMenuItem {
+        let item = NSMenuItem()
+        let w: CGFloat = 220, h: CGFloat = 30
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+        let dev = defaultDevice(isInputMode)
+        let vol = getVolume(dev, input: isInputMode)
+        let muted = getMute(dev, input: isInputMode) ?? false
+        let canVol = (vol != nil)
+
+        let btn = NSButton(frame: NSRect(x: 0, y: (h - 22) / 2, width: 22, height: 22))
+        btn.isBordered = false
+        btn.imagePosition = .imageOnly
+        btn.image = volIconImage(muted: muted)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        btn.contentTintColor = !canVol ? .tertiaryLabelColor
+                             : (muted ? .controlAccentColor : .secondaryLabelColor)
+        btn.isEnabled = canVol
+        btn.target = self
+        btn.action = #selector(toggleMute)
+        box.addSubview(btn)
+        volIcon = btn
+
+        let pctW: CGFloat = 36
+        let pctX = w - pctW - 4
+        let sx: CGFloat = 28
+        let slider = NSSlider(frame: NSRect(x: sx, y: (h - 18) / 2,
+                                            width: max(20, pctX - 8 - sx), height: 18))
+        slider.minValue = 0
+        slider.maxValue = 1
+        slider.isContinuous = true
+        slider.doubleValue = Double(vol ?? 0)
+        slider.isEnabled = canVol
+        slider.target = self
+        slider.action = #selector(volumeChanged(_:))
+        box.addSubview(slider)
+        volSlider = slider
+
+        let pct = NSTextField(labelWithString: canVol ? "\(Int(((vol ?? 0) * 100).rounded()))%" : "—")
+        pct.frame = NSRect(x: pctX, y: (h - 15) / 2, width: pctW, height: 15)
+        pct.alignment = .right
+        pct.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        pct.textColor = canVol ? .secondaryLabelColor : .tertiaryLabelColor
+        pct.tag = 99
+        box.addSubview(pct)
+
+        item.view = box
+        return item
+    }
+
+    /// 输出用喇叭，输入用麦克风
+    private func volIconImage(muted: Bool) -> NSImage? {
+        let name: String
+        if isInputMode { name = muted ? "mic.slash.fill" : "mic.fill" }
+        else           { name = muted ? "speaker.slash.fill" : "speaker.fill" }
+        return NSImage(systemSymbolName: name, accessibilityDescription: "静音")
+    }
+
+    @objc func volumeChanged(_ sender: NSSlider) {
+        let dev = defaultDevice(isInputMode)
+        setVolume(dev, Float(sender.doubleValue), input: isInputMode)
+        if sender.doubleValue > 0.001, getMute(dev, input: isInputMode) == true {
+            setMute(dev, false, input: isInputMode)
+        }
+        if let pct = volSlider?.superview?.viewWithTag(99) as? NSTextField {
+            pct.stringValue = "\(Int((sender.doubleValue * 100).rounded()))%"
+        }
+        refreshVolIcon()
+    }
+
+    @objc func toggleMute() {
+        let dev = defaultDevice(isInputMode)
+        setMute(dev, !(getMute(dev, input: isInputMode) ?? false), input: isInputMode)
+        refreshVolIcon()
+    }
+
+    private func refreshVolIcon() {
+        let muted = getMute(defaultDevice(isInputMode), input: isInputMode) ?? false
+        volIcon?.image = volIconImage(muted: muted)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .regular))
+        volIcon?.contentTintColor = muted ? .controlAccentColor : .secondaryLabelColor
+    }
+
     private func header(_ text: String) -> NSMenuItem {
         let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
         item.isEnabled = false
@@ -414,6 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
               let raw = info["id"] as? Int,
               let input = info["input"] as? Bool else { return }
         _ = setDefault(AudioDeviceID(raw), input: input)
+        isInputMode = input          // 音量条跟着切到对应的作用域
         rebuildMenu()
     }
 
