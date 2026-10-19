@@ -366,6 +366,51 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     return s
 }
 
+/// 把 SF Symbol 染成指定颜色并包成文本附件（用于在菜单标题里嵌图标）
+func symbolAttachment(_ name: String, color: NSColor, pointSize: CGFloat = 11) -> NSAttributedString? {
+    guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular))
+    else { return nil }
+    let tinted = NSImage(size: img.size, flipped: false) { rect in
+        img.draw(in: rect)
+        color.set()
+        rect.fill(using: .sourceIn)
+        return true
+    }
+    let att = NSTextAttachment()
+    att.image = tinted
+    return NSAttributedString(attachment: att)
+}
+
+/// 自绘 IO 接口图形（扁平风格）
+/// 3.5mm 插孔 = 外环 + 内点；光纤方口 = 外方框 + 内方点
+func connectorIcon(_ conn: String, color: NSColor, size: CGFloat = 13) -> NSAttributedString {
+    let img = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        color.set()
+        if conn == "SPDIF" {
+            // 方口：外框 + 内芯
+            let outer = rect.insetBy(dx: 1.2, dy: 1.2)
+            let p = NSBezierPath(roundedRect: outer, xRadius: 1.5, yRadius: 1.5)
+            p.lineWidth = 2.0
+            p.stroke()
+            let inner = rect.insetBy(dx: 4.2, dy: 4.2)
+            NSBezierPath(roundedRect: inner, xRadius: 0.8, yRadius: 0.8).fill()
+        } else {
+            // 3.5mm 圆孔：外环 + 内芯
+            let outer = rect.insetBy(dx: 1.4, dy: 1.4)
+            let p = NSBezierPath(ovalIn: outer)
+            p.lineWidth = 2.0
+            p.stroke()
+            let inner = rect.insetBy(dx: 4.4, dy: 4.4)
+            NSBezierPath(ovalIn: inner).fill()
+        }
+        return true
+    }
+    let att = NSTextAttachment()
+    att.image = img
+    return NSAttributedString(attachment: att)
+}
+
 /// 中文 13pt 主色 / 方向符号 11.5pt 三级灰 / 接口名 11.5pt 次要灰 / 颜色字用插孔真实颜色
 func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String,
                   dot: Bool = false) -> NSAttributedString {
@@ -398,10 +443,10 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .font: NSFont.systemFont(ofSize: 11.5),
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
-    s.append(NSAttributedString(string: "\t" + color, attributes: [
-        .font: NSFont.systemFont(ofSize: 12),
-        .foregroundColor: jackColor(color),
-        .paragraphStyle: style]))
+    // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
+    let iconColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
+    s.append(NSAttributedString(string: "\t", attributes: [.paragraphStyle: style]))
+    s.append(connectorIcon(conn, color: iconColor))
     return s
 }
 
