@@ -366,6 +366,33 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     return s
 }
 
+/// 把 SF Symbol 染成指定颜色并包成文本附件（用于在菜单标题里嵌图标）
+func symbolAttachment(_ name: String, color: NSColor, pointSize: CGFloat = 11) -> NSAttributedString? {
+    guard let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular))
+    else { return nil }
+    let tinted = NSImage(size: img.size, flipped: false) { rect in
+        img.draw(in: rect)
+        color.set()
+        rect.fill(using: .sourceIn)
+        return true
+    }
+    let att = NSTextAttachment()
+    att.image = tinted
+    return NSAttributedString(attachment: att)
+}
+
+/// 接口类型 → SF Symbol 名（代表"这是个什么接口"）
+func connectorSymbol(_ conn: String) -> String {
+    switch conn {
+    case "HP":    return "headphones"          // 耳机
+    case "MIC":   return "mic"                 // 麦克风
+    case "LINE":  return "cable.connector"     // 3.5mm 线路插孔
+    case "SPDIF": return "light.max"           // 光纤
+    default:      return "cable.connector"
+    }
+}
+
 /// 中文 13pt 主色 / 方向符号 11.5pt 三级灰 / 接口名 11.5pt 次要灰 / 颜色字用插孔真实颜色
 func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String,
                   dot: Bool = false) -> NSAttributedString {
@@ -398,13 +425,17 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .font: NSFont.systemFont(ofSize: 11.5),
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
-    // 颜色列改成扁平化图标：3.5mm 插孔用实心圆点，光纤（方口）用方块
-    let isOptical = (conn == "SPDIF")
-    let glyph = isOptical ? "\u{25A0}" : "\u{25CF}"
-    s.append(NSAttributedString(string: "\t" + glyph, attributes: [
-        .font: NSFont.systemFont(ofSize: isOptical ? 9 : 10),
-        .foregroundColor: isOptical ? NSColor.black : jackColor(color),
-        .paragraphStyle: style]))
+    // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
+    let iconColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
+    if let icon = symbolAttachment(connectorSymbol(conn), color: iconColor) {
+        s.append(NSAttributedString(string: "\t", attributes: [.paragraphStyle: style]))
+        s.append(icon)
+    } else {
+        s.append(NSAttributedString(string: "\t" + color, attributes: [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: iconColor,
+            .paragraphStyle: style]))
+    }
     return s
 }
 
