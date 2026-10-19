@@ -350,6 +350,7 @@ func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
         .font: NSFont.systemFont(ofSize: 8),
         .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .baselineOffset: 2,
         .paragraphStyle: style]))
     s.append(NSAttributedString(string: "\t" + text, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
@@ -376,6 +377,7 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
     s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
         .font: NSFont.systemFont(ofSize: 8),
         .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .baselineOffset: 2,
         .paragraphStyle: style]))
     s.append(NSAttributedString(string: "\t" + cn, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
