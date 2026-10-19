@@ -157,6 +157,25 @@ func jackColor(_ c: String) -> NSColor {
     }
 }
 
+/// 普通菜单项（声音设置/登录时启动/退出）也用同一套对齐：
+/// 「圆点槽 + tab 到 kNameX」，这样它们和设备行的中文列严格对齐
+func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
+    let style = NSMutableParagraphStyle()
+    style.tabStops = [NSTextTab(textAlignment: .left, location: kNameX)]
+    style.defaultTabInterval = 0
+
+    let s = NSMutableAttributedString()
+    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
+        .font: NSFont.systemFont(ofSize: 8),
+        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .paragraphStyle: style]))
+    s.append(NSAttributedString(string: "\t" + text, attributes: [
+        .font: NSFont.systemFont(ofSize: 13),
+        .foregroundColor: NSColor.labelColor,
+        .paragraphStyle: style]))
+    return s
+}
+
 /// 中文 13pt 主色 / 方向符号 11.5pt 三级灰 / 接口名 11.5pt 次要灰 / 颜色字用插孔真实颜色
 func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String,
                   dot: Bool = false) -> NSAttributedString {
@@ -345,11 +364,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         let open = NSMenuItem(title: "声音设置…", action: #selector(openSoundPrefs), keyEquivalent: "")
         open.target = self
+        open.attributedTitle = plainTitle("声音设置…")
         menu.addItem(open)
 
         let auto = NSMenuItem(title: "登录时启动", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         auto.target = self
-        auto.state = isLaunchAtLoginEnabled() ? .on : .off
+        auto.state = .off                       // 不用系统对号
+        auto.attributedTitle = plainTitle("登录时启动", dot: isLaunchAtLoginEnabled())
         auto.toolTip = "开机后自动运行 AudioSwitch（在系统设置 → 通用 → 登录项 里可见）"
         menu.addItem(auto)
 
@@ -358,6 +379,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = NSMenuItem(title: "退出", action: #selector(quitApp), keyEquivalent: "")
         quit.target = self
         quit.image = nil
+        quit.attributedTitle = plainTitle("退出")
         menu.addItem(quit)
     }
 
