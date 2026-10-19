@@ -318,10 +318,10 @@ func sortRank(index: Int, isInput: Bool) -> Int {
 //  128 = 颜色
 // ★ defaultTabInterval 必须是 0：设成非 0 会生成额外的隐式停靠位，
 //   把后面几列顶到画布外（实测宽度从 151 变成 264）
-let kNameX: CGFloat  = 12      // 名字列（圆点之后）
-let kArrowX: CGFloat = 66
-let kConnX: CGFloat  = 84
-let kColorX: CGFloat = 161     // 颜色右对齐位置：紧贴接口名，右侧留白 21（左侧 26）
+let kNameX: CGFloat  = 18      // 名字列（左边距 14+18=32）
+let kArrowX: CGFloat = 72
+let kConnX: CGFloat  = 90
+let kColorX: CGFloat = 164     // 颜色右对齐位置：右侧留白 18
 
 /// 颜色字用真实颜色渲染，不用读就知道是哪个口
 func jackColor(_ c: String) -> NSColor {
@@ -617,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
     private func volumeItem() -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 196, h: CGFloat = 30     // 组件整体收窄（原 220）
+        let w: CGFloat = 196, h: CGFloat = 34     // 组件整体收窄（原 220）
         let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
@@ -734,7 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 196, height: 22)   // 与系统菜单项高度一致
+        v.frame = NSRect(x: 0, y: 0, width: 196, height: 26)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
