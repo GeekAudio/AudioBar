@@ -170,12 +170,12 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
 
     let s = NSMutableAttributedString()
     // 圆点画在标题最前面（不用 item.image，避免图标槽造成缩进）
-    if dot {
-        s.append(NSAttributedString(string: "●", attributes: [
-            .font: NSFont.systemFont(ofSize: 8),
-            .foregroundColor: NSColor.controlAccentColor,
-            .paragraphStyle: style]))
-    }
+    // ★ 每行都以一个字符开头再 tab：行首直接写 tab 时 AppKit 会吞掉，
+    //   导致选中行(有●)和未选中行(无●)的名字起点不一致。
+    s.append(NSAttributedString(string: dot ? "●" : " ", attributes: [
+        .font: NSFont.systemFont(ofSize: 8),
+        .foregroundColor: dot ? NSColor.controlAccentColor : NSColor.clear,
+        .paragraphStyle: style]))
     s.append(NSAttributedString(string: "\t" + cn, attributes: [
         .font: NSFont.systemFont(ofSize: 13),
         .foregroundColor: NSColor.labelColor,
