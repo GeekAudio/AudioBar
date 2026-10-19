@@ -398,9 +398,12 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .font: NSFont.systemFont(ofSize: 11.5),
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
-    s.append(NSAttributedString(string: "\t" + color, attributes: [
-        .font: NSFont.systemFont(ofSize: 12),
-        .foregroundColor: jackColor(color),
+    // 颜色列改成扁平化图标：3.5mm 插孔用实心圆点，光纤（方口）用方块
+    let isOptical = (conn == "SPDIF")
+    let glyph = isOptical ? "\u{25A0}" : "\u{25CF}"
+    s.append(NSAttributedString(string: "\t" + glyph, attributes: [
+        .font: NSFont.systemFont(ofSize: isOptical ? 9 : 10),
+        .foregroundColor: isOptical ? NSColor.black : jackColor(color),
         .paragraphStyle: style]))
     return s
 }
