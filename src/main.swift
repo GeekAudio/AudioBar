@@ -160,6 +160,33 @@ func panelColumns(index: Int, isInput: Bool) -> (String, String, String, String)
     }
 }
 
+/// 通用兜底：本机索引表没命中时，从 AppleHDA 给的系统设备名推导
+/// 设备名本身携带类型（Built-in Line Output / Headphone / Microphone…），
+/// 与 CoreAudio 枚举天然一一对应，不需要跨层映射 ⇒ 换任何机器都能显示
+/// 缺点：拿不到插孔颜色，颜色列留空
+func derivedColumns(name: String, isInput: Bool) -> (String, String, String, String)? {
+    let n = name.lowercased()
+    func has(_ k: String) -> Bool { n.contains(k) }
+
+    if isInput {
+        if has("digital input") || has("spdif") { return ("数字输入", "←", "SPDIF", "") }
+        if has("line input") || has("linein")   { return ("线路输入", "←", "LINE",  "") }
+        if has("microphone") || has("mic")      { return ("话筒",     "←", "MIC",   "") }
+        return nil
+    } else {
+        if has("digital output") || has("spdif") { return ("光纤输出", "→", "SPDIF", "") }
+        if has("headphone")                      { return ("耳机",     "→", "HP",    "") }
+        if has("line output") || has("lineout")  { return ("线路输出", "→", "LINE",  "") }
+        if has("speaker")                        { return ("扬声器",   "→", "SPK",   "") }
+        return nil
+    }
+}
+
+/// 先查本机精确表，查不到再走通用推导
+func columns(for d: AudioDev) -> (String, String, String, String)? {
+    panelColumns(index: d.index, isInput: d.isInput) ?? derivedColumns(name: d.name, isInput: d.isInput)
+}
+
 func panelLabel(index: Int, isInput: Bool) -> String? {
     guard let c = panelColumns(index: index, isInput: isInput) else { return nil }
     return c.0
@@ -451,8 +478,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let canVol = (vol != nil)
 
         // 左右各留 inset，图标 / 滑块 / 百分比之间的间隙统一为 gap
-        let inset: CGFloat = 8
-        let gap: CGFloat = 8
+        let inset: CGFloat = 4
+        let gap: CGFloat = 4
         let btn = NSButton(frame: NSRect(x: inset, y: (h - 22) / 2, width: 22, height: 22))
         btn.isBordered = false
         btn.imagePosition = .imageOnly
@@ -544,7 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.state = .off
         item.image = nil
 
-        if let c = panelColumns(index: d.index, isInput: d.isInput) {
+        if let c = columns(for: d) {
             item.attributedTitle = alignedTitle(c.0, c.1, c.2, c.3, dot: active)
         }
         let hint = panelHint(index: d.index, isInput: d.isInput)
@@ -672,7 +699,7 @@ if CommandLine.arguments.contains("--dump") {
     let curIn = defaultDevice(true)
     func line(_ d: AudioDev, _ cur: AudioDeviceID) -> String {
         let mark = d.id == cur ? "●" : "○"
-        guard let c = panelColumns(index: d.index, isInput: d.isInput) else {
+        guard let c = columns(for: d) else {
             return "  \(mark) \(d.name)  [idx=\(d.index)]"
         }
         return "  \(mark) \(c.0.padding(toLength: 14, withPad: " ", startingAt: 0))"
