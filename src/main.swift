@@ -344,7 +344,7 @@ func jackColor(_ c: String) -> NSColor {
 /// 「圆点槽 + tab 到 kNameX」，这样它们和设备行的中文列严格对齐
 func plainTitle(_ text: String, dot: Bool = false) -> NSAttributedString {
     let style = NSMutableParagraphStyle()
-    style.tabStops = [NSTextTab(textAlignment: .left, location: 18)]
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 14)]
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
@@ -418,8 +418,7 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
     // 四列：圆点 / 名字 / 方向符号 / 接口名 / 颜色
     style.tabStops = [NSTextTab(textAlignment: .left, location: 16),
                       NSTextTab(textAlignment: .left, location: kArrowX),
-                      NSTextTab(textAlignment: .left, location: kConnX),
-                      NSTextTab(textAlignment: .right, location: kColorX)]   // 右对齐，右侧留白和左边对称
+                      NSTextTab(textAlignment: .left, location: kConnX)]   // 右对齐，右侧留白和左边对称
     style.defaultTabInterval = 0
 
     let s = NSMutableAttributedString()
@@ -442,10 +441,6 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
     // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
-    s.append(NSAttributedString(string: "\t" + color, attributes: [
-        .font: NSFont.systemFont(ofSize: 12),
-        .foregroundColor: baseColor,
-        .paragraphStyle: style]))
     return s
 }
 
@@ -504,7 +499,7 @@ final class RowView: NSView {
         }
         // ★ 普通菜单项的文字有 ~14pt 左边距（勾选槽），view 项没有。
         //   这里补上同样的偏移，才能和「输出设备」标题、底部三项对齐。
-        title.draw(at: NSPoint(x: 18, y: (bounds.height - title.size().height) / 2))
+        title.draw(at: NSPoint(x: 12, y: (bounds.height - title.size().height) / 2))
     }
 }
 
@@ -670,7 +665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
     private func volumeItem() -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 196, h: CGFloat = 34     // 组件整体收窄（原 220）
+        let w: CGFloat = 149, h: CGFloat = 34     // 组件整体收窄（原 220）
         let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
@@ -787,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 196, height: 26)   // 与系统菜单项高度一致
+        v.frame = NSRect(x: 0, y: 0, width: 149, height: 26)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
