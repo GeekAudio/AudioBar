@@ -617,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
     private func volumeItem() -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 196, h: CGFloat = 30     // 组件整体收窄（原 220）
+        let w: CGFloat = 210, h: CGFloat = 30     // 组件整体收窄（原 220）
         let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
@@ -643,8 +643,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let pctW: CGFloat = 36
         let pctX = w - inset - pctW
         let sx = inset + 22 + gap
-        let slider = NSSlider(frame: NSRect(x: sx, y: (h - 18) / 2,
-                                            width: max(20, pctX - gap - sx), height: 18))
+        // 滑块和图标同高（22）且同一中心线，避免视觉上不齐
+        let slider = NSSlider(frame: NSRect(x: sx, y: (h - 22) / 2,
+                                            width: max(20, pctX - gap - sx), height: 22))
         slider.minValue = 0
         slider.maxValue = 1
         slider.isContinuous = true
@@ -733,7 +734,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 196, height: 22)   // 与系统菜单项高度一致
+        v.frame = NSRect(x: 0, y: 0, width: 210, height: 22)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = panelHint(index: d.index, isInput: d.isInput)
         return item
