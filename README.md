@@ -35,6 +35,7 @@ xattr -dr com.apple.quarantine /Applications/AudioBar.app
 
 ```bash
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --dump              # 打印菜单内容
+/Applications/AudioBar.app/Contents/MacOS/AudioSwitch --pins              # 打印 codec 引脚与推导结果
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --autostart-status  # 查看开机自启动
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --enable-autostart
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --disable-autostart
@@ -43,8 +44,37 @@ xattr -dr com.apple.quarantine /Applications/AudioBar.app
 ## 构建
 
 ```bash
-bash tools/build-audiobar.sh            # 只编译
+bash tools/build-audiobar.sh            # 只编译，产出 ./AudioBar.app
 bash tools/build-audiobar.sh --install  # 编译 + 部署到 /Applications
 ```
 
-需要 Xcode 命令行工具。
+需要 Xcode 命令行工具。`alc-verb` 是可选的（只影响麦克风偏置这一项）：
+
+```bash
+ALC_VERB=/path/to/AppleALC/build/Release/alc-verb bash tools/build-audiobar.sh
+```
+
+## 更新记录
+
+### v1.2
+
+修好「按 codec 自动推导插孔颜色 / 接口类型」——这条在 v1.1 里实际是**完全没生效**的
+（`--pins` 里引脚列表为空，一直靠硬编码表兜底）。
+
+| # | 问题 | 修法 |
+|---|---|---|
+| 1 | `HDAConfigDefault` 用 `as? Data` 读不到 | 实际是字典数组，读 `BootConfigData` |
+| 2 | 遍历深度限制 `depth < 3` 太浅 | 属性在控制器下第 4~5 层 → 改 8 |
+| 3 | `bindMemory(to: UInt32.self)` 把大端 verb 读反 | 改逐字节按大端拼 |
+| 4 | 用 bit31 判「有插孔」 | bit31 是 PortConnectivity 高位，插孔 `00b` 反而为 0 → 改判 `(v>>30)&3 != 01b` |
+| 5 | `derivedColumns()` 只在 SPDIF 分支用颜色 | 其他分支硬编码空串 → 全部改用推导值 |
+| 6 | 要求引脚数 == 设备数才配对 | 板载常不暴露 REAR / C-SUB → 放宽为「引脚 ≥ 设备」取前 N |
+
+字段表按 Hackintool（[benbaker76/Hackintool](https://github.com/benbaker76/Hackintool)，
+`NSColor+Pin.m` / `NSString+Pin.m`）对齐：
+
+- 颜色补上 `14 = 白`、`15 = 其他`
+- 用 `Connection Type = 5 (Optical)` 权威判定光纤口，不再靠设备名猜
+- `Port Connectivity`：跳过 `01b = No Connection`
+
+另：`tools/build-audiobar.sh` 随仓库提供，不再需要外部脚本。

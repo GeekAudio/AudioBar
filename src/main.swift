@@ -163,27 +163,77 @@ func panelColumns(index: Int, isInput: Bool) -> (String, String, String, String)
 
 // MARK: - codec 引脚配置（取颜色用，Hackintool 同款做法）
 
-/// 从 IORegistry 的 AppleHDAController / HDAConfigDefault 读整份 pin config。
-/// 一次属性读取即可，不用 alc-verb 逐节点发 verb。
-/// 每个 UInt32 里：bit31=有插孔、bit20-23=device type、bit12-15=颜色
-/// 返回 [(deviceType, 颜色名)]，顺序即节点 nid 升序
-func codecPinColors() -> [(Int, String)] {
-    var out: [(Int, String)] = []
-    // 在控制器及其所有子节点里找 HDAConfigDefault（属性挂在 codec 子节点上）
+/// 从 IORegistry 的 codec 节点读整份 pin config，返回 [(deviceType, 颜色名)]。
+///
+/// 属性 `HDAConfigDefault` 有两种形态，都要支持：
+///   ① **数组**（AppleALC 实际注入的形态）——每条是字典，带 `ConfigData` / `BootConfigData`，
+///      内容是 **HDA verb 序列**，不是扁平的 pin config。
+///   ② **Data**（Hackintool 期望的形态）——直接是 32 位 pin config 数组。
+///
+/// verb 编码（每 4 字节一条，**大端**）：bits31:28 codec 地址、bits27:20 nid、
+/// bits19:8 verb、bits7:0 payload。其中 verb `0x71C…0x71F` 依次写 pin config 的
+/// byte0…byte3 ⇒ 拼回 32 位后按 Intel HDA 规范 Figure 74 取字段。
+func codecPinColors() -> [(devType: Int, color: String, connector: Int)] {
+    var out: [(devType: Int, color: String, connector: Int)] = []
+
+    /// verb 序列 → 每个 nid 的 32 位 pin config（按 nid 升序）
+    func pinsFromVerbs(_ d: Data) -> [Int] {
+        let b = [UInt8](d)
+        var bytes: [Int: [Int]] = [:]          // nid -> [b0, b1, b2, b3]
+        var i = 0
+        while i + 3 < b.count {
+            // 必须逐字节按大端拼，直接 bindMemory(to: UInt32.self) 在小端机器上会读反
+            let w = (UInt32(b[i]) << 24) | (UInt32(b[i + 1]) << 16)
+                  | (UInt32(b[i + 2]) << 8) | UInt32(b[i + 3])
+            let nid  = Int((w >> 20) & 0xFF)
+            let verb = Int((w >> 8) & 0xFFF)
+            if verb >= 0x71C, verb <= 0x71F {
+                var arr = bytes[nid] ?? [0, 0, 0, 0]
+                arr[verb - 0x71C] = Int(w & 0xFF)
+                bytes[nid] = arr
+            }
+            i += 4
+        }
+        return bytes.keys.sorted().map { nid in
+            let a = bytes[nid]!
+            return (a[3] << 24) | (a[2] << 16) | (a[1] << 8) | a[0]
+        }
+    }
+
+    func decode(_ v: Int) {
+        // bits31:30 = Port Connectivity：00 插孔 / 01 无物理连接 / 10 固定内置 / 11 两者
+        // 注意不能拿 bit31 当「有插孔」——插孔的 00b 反而让 bit31=0
+        let portConn = (v >> 30) & 0x3
+        guard portConn != 0b01 else { return }            // 跳过「无物理连接」的引脚
+        let color = colorName((v >> 12) & 0xF)
+        guard !color.isEmpty else { return }
+        out.append((devType:   (v >> 20) & 0xF,           // bits23:20 = Default Device
+                    color:     color,                     // bits15:12 = Color
+                    connector: (v >> 16) & 0xF))          // bits19:16 = Connection Type
+    }
+
+    // 属性挂在 codec 子节点上，实测在控制器下第 4~5 层，深度给足
     func scan(_ entry: io_registry_entry_t, depth: Int) {
         if out.isEmpty,
-           let d = IORegistryEntryCreateCFProperty(entry, "HDAConfigDefault" as CFString,
-                                                   kCFAllocatorDefault, 0)?
-            .takeRetainedValue() as? Data, d.count >= 4 {
-            let words = d.withUnsafeBytes { Array($0.bindMemory(to: UInt32.self)) }
-            for v in words {
-                guard (v & 0x8000_0000) != 0 else { continue }
-                let color = colorName(Int((v >> 12) & 0xF))
-                guard !color.isEmpty else { continue }
-                out.append((Int((v >> 20) & 0xF), color))
+           let any = IORegistryEntryCreateCFProperty(entry, "HDAConfigDefault" as CFString,
+                                                    kCFAllocatorDefault, 0)?.takeRetainedValue() {
+            if let arr = any as? [[String: Any]] {
+                for e in arr {
+                    if let d = (e["BootConfigData"] as? Data) ?? (e["ConfigData"] as? Data) {
+                        for v in pinsFromVerbs(d) { decode(v) }
+                    }
+                }
+            } else if let d = any as? Data {
+                let b = [UInt8](d)
+                var i = 0
+                while i + 3 < b.count {
+                    decode((Int(b[i]) << 24) | (Int(b[i + 1]) << 16)
+                         | (Int(b[i + 2]) << 8) | Int(b[i + 3]))
+                    i += 4
+                }
             }
         }
-        guard depth < 3 else { return }
+        guard depth < 8 else { return }
         var child: io_iterator_t = 0
         if IORegistryEntryGetChildIterator(entry, kIOServicePlane, &child) == KERN_SUCCESS {
             var c = IOIteratorNext(child)
@@ -209,21 +259,29 @@ func codecPinColors() -> [(Int, String)] {
     return out
 }
 
-/// pin config 的颜色码 → 中文
+/// pin config 的颜色码 → 中文。
+/// 表按 Hackintool 的 `gPinColorArray`（PinConfigurator，Ben Baker）原样对齐：
+///   Unknown, Black, Gray, Blue, Green, Red, Orange, Yellow,
+///   Purple, Pink, Reserved1, Unknown, Unknown, Reserved2, White, Other
 func colorName(_ c: Int) -> String {
     switch c {
-    case 1: return "黑"
-    case 2: return "灰"
-    case 3: return "蓝"
-    case 4: return "绿"
-    case 5: return "红"
-    case 6: return "橙"
-    case 7: return "黄"
-    case 8: return "紫"
-    case 9: return "粉"
-    default: return ""
+    case 1:  return "黑"
+    case 2:  return "灰"
+    case 3:  return "蓝"
+    case 4:  return "绿"
+    case 5:  return "红"
+    case 6:  return "橙"
+    case 7:  return "黄"
+    case 8:  return "紫"
+    case 9:  return "粉"
+    case 14: return "白"
+    case 15: return "其他"
+    default: return ""            // 0 Unknown / 10 Reserved1 / 11-12 Unknown / 13 Reserved2
     }
 }
+
+/// Connection Type → 是否光纤。Hackintool `gPinConnector`：5 = Optical
+func isOptical(_ connector: Int) -> Bool { connector == 5 }
 
 /// 系统设备名 → HDA device type（用于和 codec 引脚配对）
 func hdaDevType(_ name: String, isInput: Bool) -> Int? {
@@ -250,37 +308,47 @@ func derivedColumns(name: String, isInput: Bool) -> (String, String, String, Str
     let n = name.lowercased()
     func has(_ k: String) -> Bool { n.contains(k) }
 
-    let color = pinColor(for: name, isInput: isInput)
+    let pin = pinFor(name: name, isInput: isInput)
+    let color = pin?.color ?? ""
+    // Connection Type = Optical 时一定是光纤口，比设备名更可靠
+    let optical = isOptical(pin?.connector ?? 0)
 
     if isInput {
-        if has("digital input") || has("spdif") { return ("数字输入", "←", "SPDIF", color) }
-        if has("line input") || has("linein")   { return ("线路输入", "←", "LINE",  "") }
-        if has("microphone") || has("mic")      { return ("话筒",     "←", "MIC",   "") }
+        if has("digital input") || has("spdif") || optical { return ("数字输入", "←", "SPDIF", color) }
+        if has("line input") || has("linein")   { return ("线路输入", "←", "LINE",  color) }
+        if has("microphone") || has("mic")      { return ("话筒",     "←", "MIC",   color) }
         return nil
     } else {
-        if has("digital output") || has("spdif") { return ("光纤输出", "→", "SPDIF", color) }
-        if has("headphone")                      { return ("耳机",     "→", "HP",    "") }
-        if has("line output") || has("lineout")  { return ("线路输出", "→", "LINE",  "") }
-        if has("speaker")                        { return ("扬声器",   "→", "SPK",   "") }
+        if has("digital output") || has("spdif") || optical { return ("光纤输出", "→", "SPDIF", color) }
+        if has("headphone")                      { return ("耳机",     "→", "HP",    color) }
+        if has("line output") || has("lineout")  { return ("线路输出", "→", "LINE",  color) }
+        if has("speaker")                        { return ("扬声器",   "→", "SPK",   color) }
         return nil
     }
 }
 
 /// 给某个 CoreAudio 设备找它的插孔颜色。
-/// 只做「同 device type 内按顺序配对」，并且**数量必须对得上**才采用——
-/// 对不上就返回空，避免颜色张冠李戴（比没有更糟）。
-func pinColor(for name: String, isInput: Bool) -> String {
-    guard let dt = hdaDevType(name, isInput: isInput) else { return "" }
-    let pins = codecPinColors().filter { $0.0 == dt }.map { $0.1 }
-    guard !pins.isEmpty else { return "" }
+/// 同 device type 内按顺序配对：
+///   · 数量相等 → 一一对应
+///   · **引脚多于设备** → 取前 N 个（常见于板载没把 REAR / C-SUB 暴露成设备，
+///     此时排在前面的才是主输出口）
+///   · 引脚少于设备 → 返回空（无法覆盖，宁可无色也不要张冠李戴）
+func pinFor(name: String, isInput: Bool) -> (color: String, connector: Int)? {
+    guard let dt = hdaDevType(name, isInput: isInput) else { return nil }
+    let pins = codecPinColors().filter { $0.devType == dt }
+    guard !pins.isEmpty else { return nil }
 
     // 同一 device type 的 CoreAudio 设备（按显示顺序）
     let sameType = allAudioDevices()
         .filter { $0.isInput == isInput && hdaDevType($0.name, isInput: isInput) == dt }
         .sorted { sortRank(index: $0.index, isInput: isInput) < sortRank(index: $1.index, isInput: isInput) }
-    guard sameType.count == pins.count,
-          let idx = sameType.firstIndex(where: { $0.name == name }) else { return "" }
-    return pins[idx]
+    guard pins.count >= sameType.count,
+          let idx = sameType.firstIndex(where: { $0.name == name }) else { return nil }
+    return (pins[idx].color, pins[idx].connector)
+}
+
+func pinColor(for name: String, isInput: Bool) -> String {
+    pinFor(name: name, isInput: isInput)?.color ?? ""
 }
 
 /// 先查本机精确表，查不到再走通用推导
@@ -934,7 +1002,9 @@ if CommandLine.arguments.contains("--disable-autostart") {
 // --pins：打印 codec 引脚颜色与推导结果（验证取色是否和硬编码表一致）
 if CommandLine.arguments.contains("--pins") {
     print("codec 引脚 (deviceType, 颜色)：")
-    for (t, c) in codecPinColors() { print("  type=\(t)  \(c)") }
+    for p in codecPinColors() {
+        print("  type=\(p.devType)  \(p.color)  connector=\(p.connector)\(isOptical(p.connector) ? " (光纤)" : "")")
+    }
     print("\n逐设备推导：")
     for d in allAudioDevices() {
         let derived = derivedColumns(name: d.name, isInput: d.isInput)
