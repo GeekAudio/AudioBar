@@ -36,6 +36,8 @@ xattr -dr com.apple.quarantine /Applications/AudioBar.app
 ```bash
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --dump              # 打印菜单内容
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --pins              # 打印 codec 引脚与推导结果
+/Applications/AudioBar.app/Contents/MacOS/AudioSwitch --volume [0-1]      # 查看/设置默认输出音量，并显示用的是哪个控件
+/Applications/AudioBar.app/Contents/MacOS/AudioSwitch --render out.png    # 把设备行按真实样式画成图片
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --autostart-status  # 查看开机自启动
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --enable-autostart
 /Applications/AudioBar.app/Contents/MacOS/AudioSwitch --disable-autostart
@@ -78,3 +80,43 @@ ALC_VERB=/path/to/AppleALC/build/Release/alc-verb bash tools/build-audiobar.sh
 - `Port Connectivity`：跳过 `01b = No Connection`
 
 另：`tools/build-audiobar.sh` 随仓库提供，不再需要外部脚本。
+
+### v1.3
+
+两个修复 + 两个调试参数。
+
+**① 蓝牙设备音量控制不了**
+
+蓝牙 A2DP 设备没有主音量寄存器，只有逐声道的 `VolumeScalar`（el=1 / el=2）和 HAL 的
+`VirtualMainVolume`。旧代码回退到 el=1 单声道，实测只改 ch1、ch2 不变，而 A2DP 的增益取两声道合成，
+所以听感完全没变化（系统音量条走 `VirtualMainVolume`，两声道一起变，所以有效）。
+
+现在按优先级选控件：
+
+| 顺序 | 控件 | 适用 |
+|---|---|---|
+| ① | `VolumeScalar` + Main | 内置声卡（行为不变） |
+| ② | `VirtualMainVolume` + Main | **蓝牙 / AirPlay / HDMI**（系统同款） |
+| ③ | `VolumeScalar` el=1 + el=2 | 兜底，两个都写 |
+
+**② 插孔图标配色统一**
+
+原来 SPDIF 方形图标的颜色被硬编码成 `NSColor.black`，绕过了调色函数；同时中性色的判定阈值
+（`s <= 0.05`）比黑色实际的饱和度（0.074）还小，导致亮度调整从来没执行过。两处都已修好，
+现在三种颜色和中性色统一走一套：
+
+```swift
+let kIconSaturation: CGFloat = 0.48   // 彩色饱和度
+let kIconBrightness: CGFloat = 0.95   // 彩色亮度
+let kNeutralFloor:   CGFloat = 0.42   // 中性色（黑/光纤）亮度下限
+```
+
+**③ 新增调试参数**
+
+```bash
+AudioSwitch --volume          # 默认输出 id / 控件类型 / 当前音量
+AudioSwitch --volume 0.35     # 设置并读回
+AudioSwitch --render /tmp/rows.png   # 用真实绘制代码把设备行画成图片
+```
+
+`--render` 走的是 app 自己的 `alignedTitle` + `connectorIcon`，调样式时不会和实际逻辑分叉。

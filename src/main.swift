@@ -87,27 +87,56 @@ func setDefault(_ dev: AudioDeviceID, input: Bool) -> Bool {
 
 // MARK: - 音量 / 静音
 
-func volumeAddress(_ dev: AudioDeviceID, input: Bool) -> AudioObjectPropertyAddress? {
+/// HAL 的「虚拟主音量」选择器 'vmvc'（kAudioHardwareServiceDeviceProperty_VirtualMainVolume）。
+/// 蓝牙 / AirPlay / HDMI 这类没有硬件音量寄存器的设备，系统音量条走的就是这条。
+let kVirtualMainVolume: AudioObjectPropertySelector = 0x766D_7663
+
+/// 某个设备可用的音量控件，按优先级返回：
+///   ① 硬件主音量  VolumeScalar + Main 元素
+///   ② HAL 虚拟主音量  VirtualMainVolume + Main 元素（蓝牙设备只有这条）
+///   ③ 逐声道  VolumeScalar + el=1/el=2（两个都要设，只设一个对 A2DP 不出声）
+func volumeAddresses(_ dev: AudioDeviceID, input: Bool) -> [AudioObjectPropertyAddress] {
     let scope = input ? kAudioObjectPropertyScopeInput : kAudioObjectPropertyScopeOutput
-    for el in [kAudioObjectPropertyElementMain, 1] as [AudioObjectPropertyElement] {
-        var a = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
-                                           mScope: scope, mElement: el)
-        if AudioObjectHasProperty(dev, &a) { return a }
+
+    func settable(_ a: inout AudioObjectPropertyAddress) -> Bool {
+        guard AudioObjectHasProperty(dev, &a) else { return false }
+        var ok: DarwinBoolean = false
+        AudioObjectIsPropertySettable(dev, &a, &ok)
+        return ok.boolValue
     }
-    return nil
+
+    // ① 硬件主音量
+    var main = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                          mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    if settable(&main) { return [main] }
+
+    // ② HAL 虚拟主音量
+    var virt = AudioObjectPropertyAddress(mSelector: kVirtualMainVolume,
+                                          mScope: scope, mElement: kAudioObjectPropertyElementMain)
+    if settable(&virt) { return [virt] }
+
+    // ③ 逐声道，两个都返回
+    var chans: [AudioObjectPropertyAddress] = []
+    for el in [1, 2] as [AudioObjectPropertyElement] {
+        var c = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyVolumeScalar,
+                                           mScope: scope, mElement: el)
+        if settable(&c) { chans.append(c) }
+    }
+    return chans
 }
 
 func getVolume(_ dev: AudioDeviceID, input: Bool) -> Float? {
-    guard var a = volumeAddress(dev, input: input) else { return nil }
+    guard var a = volumeAddresses(dev, input: input).first else { return nil }
     var v: Float32 = 0
     var size = UInt32(MemoryLayout<Float32>.size)
     return AudioObjectGetPropertyData(dev, &a, 0, nil, &size, &v) == noErr ? v : nil
 }
 
 func setVolume(_ dev: AudioDeviceID, _ value: Float, input: Bool) {
-    guard var a = volumeAddress(dev, input: input) else { return }
     var v = Float32(value)
-    AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<Float32>.size), &v)
+    for var a in volumeAddresses(dev, input: input) {
+        AudioObjectSetPropertyData(dev, &a, 0, nil, UInt32(MemoryLayout<Float32>.size), &v)
+    }
 }
 
 func muteAddress(_ dev: AudioDeviceID, input: Bool) -> AudioObjectPropertyAddress? {
@@ -392,7 +421,13 @@ let kConnX: CGFloat  = 92
 let kColorX: CGFloat = 151     // 颜色右对齐（行内坐标）：右侧留白 27
 
 /// 颜色字用真实颜色渲染，不用读就知道是哪个口
-func jackColor(_ c: String) -> NSColor {
+/// 图标配色的降饱和系数。1.0 = 原色；0.62 是实测挑出来的「明显变淡但仍分得清」。
+/// 想更淡就调小（0.5 接近灰），想更艳就往 1.0 调。
+let kIconSaturation: CGFloat = 0.48
+let kIconBrightness: CGFloat = 0.95
+
+/// 插孔基准色（饱和版，接近真实插孔颜色）
+func jackBaseColor(_ c: String) -> NSColor {
     switch c {
     case "绿":   return NSColor(srgbRed: 0.13, green: 0.62, blue: 0.24, alpha: 1)
     case "粉":   return NSColor(srgbRed: 0.85, green: 0.28, blue: 0.55, alpha: 1)
@@ -406,6 +441,28 @@ func jackColor(_ c: String) -> NSColor {
     case "光纤": return NSColor.black          // 光纤没有插孔颜色，统一用黑
     default:    return NSColor.secondaryLabelColor
     }
+}
+
+/// 中性色（黑 / 光纤）的亮度下限。
+/// 彩色图标降饱和后视觉变轻，纯黑描边会显得格外重，所以把中性色也提到同一档。
+let kNeutralFloor: CGFloat = 0.42
+
+/// 菜单里实际用的颜色：
+///   · 彩色：降饱和 + 略压亮度，避免 1.6pt 描边扎眼
+///   · 中性色：亮度抬到 kNeutralFloor，和降饱和后的彩色保持同样的视觉重量
+func jackColor(_ c: String) -> NSColor {
+    let base = jackBaseColor(c)
+    guard let rgb = base.usingColorSpace(.sRGB) else { return base }
+    var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+    rgb.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+    if s <= 0.15 {                              // 黑 / 灰 / 光纤（黑的 s 约 0.074，阈值必须大于它）
+        let nb = max(b, kNeutralFloor)
+        return NSColor(hue: h, saturation: s, brightness: nb, alpha: a)
+    }
+    return NSColor(hue: h,
+                   saturation: s * kIconSaturation,
+                   brightness: min(b * kIconBrightness, 1),
+                   alpha: a)
 }
 
 /// 普通菜单项（声音设置/登录时启动/退出）也用同一套对齐：
@@ -514,7 +571,9 @@ func alignedTitle(_ cn: String, _ arrow: String, _ conn: String, _ color: String
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: style]))
     // 颜色列改成「接口图标」：耳机/麦克风/线路/光纤 各有对应符号，按插孔颜色染色
-    let iconColor = (conn == "SPDIF") ? NSColor.black : jackColor(color)
+    // 光纤（SPDIF）也走同一套调色：以前这里硬编码 NSColor.black，
+    // 导致降饱和/调亮度对这块方形图标完全无效，和其他图标视觉不一致。
+    let iconColor = jackColor(color)
     s.append(NSAttributedString(string: "\t", attributes: [.paragraphStyle: style]))
     s.append(connectorIcon(conn, color: iconColor))
     return s
@@ -999,7 +1058,58 @@ if CommandLine.arguments.contains("--disable-autostart") {
     exit(0)
 }
 
+// --render [out.png]：把设备行按真实样式画成图片（调配色/排版时用来核对）
+if let ri = CommandLine.arguments.firstIndex(of: "--render") {
+    let out = (ri + 1 < CommandLine.arguments.count && !CommandLine.arguments[ri + 1].hasPrefix("--"))
+        ? CommandLine.arguments[ri + 1] : "/tmp/audiobar-rows.png"
+    let devs = allAudioDevices()
+    let curOut = defaultDevice(false), curIn = defaultDevice(true)
+    let items: [(NSAttributedString, Bool)] = devs.map { d in
+        let c = columns(for: d) ?? (d.name, "", "", "")
+        return (alignedTitle(c.0, c.1, c.2, c.3, dot: d.id == (d.isInput ? curIn : curOut)), d.isInput)
+    }
+    let rowH: CGFloat = 26, pad: CGFloat = 14, scale: CGFloat = 2
+    let W: CGFloat = 300
+    let H = rowH * CGFloat(items.count) + pad * 2
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                               pixelsWide: Int(W * scale), pixelsHigh: Int(H * scale),
+                               bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                               isPlanar: false, colorSpaceName: .deviceRGB,
+                               bytesPerRow: 0, bitsPerPixel: 0)!
+    rep.size = NSSize(width: W, height: H)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSColor.white.setFill(); NSRect(x: 0, y: 0, width: W, height: H).fill()
+    var y = H - pad - rowH
+    for (att, _) in items {
+        att.draw(at: NSPoint(x: 10, y: y + 5))
+        y -= rowH
+    }
+    NSGraphicsContext.restoreGraphicsState()
+    try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+    print("已渲染 \(items.count) 行 → \(out)")
+    exit(0)
+}
+
 // --pins：打印 codec 引脚颜色与推导结果（验证取色是否和硬编码表一致）
+// --volume [0-1]：打印默认输出的音量与所用控件；带数值则设置
+if let vi = CommandLine.arguments.firstIndex(of: "--volume") {
+    let dev = defaultDevice(false)
+    var sel = "无"
+    if let a = volumeAddresses(dev, input: false).first {
+        sel = a.mSelector == kVirtualMainVolume ? "VirtualMainVolume(虚拟主音量)"
+            : (a.mSelector == kAudioDevicePropertyVolumeScalar ? "VolumeScalar(硬件)" : String(format: "0x%08X", a.mSelector))
+    }
+    let cur = getVolume(dev, input: false).map { String(format: "%.3f", $0) } ?? "—"
+    print("默认输出 id=\(dev)  控件=\(sel)  当前音量=\(cur)")
+    if vi + 1 < CommandLine.arguments.count, let v = Float(CommandLine.arguments[vi + 1]) {
+        setVolume(dev, v, input: false)
+        let after = getVolume(dev, input: false).map { String(format: "%.3f", $0) } ?? "—"
+        print("已设为 \(v)  → 读回 \(after)")
+    }
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--pins") {
     print("codec 引脚 (deviceType, 颜色)：")
     for p in codecPinColors() {
