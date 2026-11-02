@@ -50,6 +50,8 @@ chmod +x "$APP/Contents/MacOS/AudioSwitch"
 [ -f "$APP/Contents/Resources/alc-verb" ] && chmod +x "$APP/Contents/Resources/alc-verb"
 
 echo "== 4. ad-hoc 签名 =="
+# File provider metadata on copied assets can make codesign reject the bundle.
+xattr -cr "$APP"
 codesign --force --deep -s - "$APP"
 
 echo "== 5. 结果 =="

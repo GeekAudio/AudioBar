@@ -18,6 +18,7 @@ macOS 菜单栏音频切换工具。黑苹果（AppleALC）环境下可显示**�
 | 设备切换 / 音量 / 静音 | **通用**，任何 Mac 都能用 |
 | 插孔名称和颜色 | **按 codec 引擎序号映射**，默认适配 ALC897 layout 14 |
 | 其他 codec | 自动回退：从系统设备名推导中文名（`Built-in Line Output` → 线路输出），颜色和图标为空 |
+| USB 等外接音频设备 | 保留系统设备名，不套用板载插孔的位置和颜色 |
 
 换机器后如果名称不对，改 `main.swift` 里的 `panelColumns()` 即可。
 
@@ -57,6 +58,10 @@ ALC_VERB=/path/to/AppleALC/build/Release/alc-verb bash tools/build-audiobar.sh
 ```
 
 ## 更新记录
+
+### v1.4
+
+修复 USB 音频输入被误标为“后置话筒”：只有 AppleHDA 音频引擎才使用板载插孔映射。外接设备保留系统名称，提示中显示其连接类型。构建时清除复制文件携带的元数据，避免签名失败。
 
 ### v1.2
 

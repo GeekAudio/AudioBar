@@ -11,6 +11,7 @@ struct AudioDev {
     let uid: String
     let index: Int        // UID 里的引擎序号
     let isInput: Bool
+    let isUSB: Bool
 }
 
 func propString(_ obj: AudioObjectID, _ sel: AudioObjectPropertySelector) -> String {
@@ -37,14 +38,32 @@ func channels(_ dev: AudioDeviceID, _ scope: AudioObjectPropertyScope) -> Int {
     return total
 }
 
-/// UID 形如 AppleHDAEngineInput:1F,3,0,1,0:3 —— 倒数第一个逗号后的数字是引擎序号
-func engineIndex(from uid: String) -> Int {
+/// 只有 AppleHDA 的输入/输出 engine UID 才能参与板载插孔索引映射。
+func isAppleHDAEngineUID(_ uid: String, isInput: Bool) -> Bool {
+    let prefix = isInput ? "AppleHDAEngineInput:" : "AppleHDAEngineOutput:"
+    return uid.hasPrefix(prefix)
+}
+
+/// AppleHDA UID 形如 AppleHDAEngineInput:1F,3,0,1,0:3。
+/// 其它驱动的 UID（例如 de_RME_driver_USBAudioEngine:0）末尾数字不是板载引擎索引。
+func engineIndex(from uid: String, isInput: Bool) -> Int {
+    guard isAppleHDAEngineUID(uid, isInput: isInput) else { return -1 }
     guard let colon = uid.firstIndex(of: ":") else { return -1 }
     let body = uid[uid.index(after: colon)...]
     let firstField = body.split(separator: ":").first.map(String.init) ?? ""
     let parts = firstField.split(separator: ",")
     guard let last = parts.last, let v = Int(last) else { return -1 }
     return v
+}
+
+func isUSBDevice(_ dev: AudioDeviceID) -> Bool {
+    var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                                          mScope: kAudioObjectPropertyScopeGlobal,
+                                          mElement: kAudioObjectPropertyElementMain)
+    var transport = UInt32(0)
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &transport) == noErr else { return false }
+    return transport == kAudioDeviceTransportTypeUSB
 }
 
 func allAudioDevices() -> [AudioDev] {
@@ -58,12 +77,16 @@ func allAudioDevices() -> [AudioDev] {
     for d in devs {
         let uid = propString(d, kAudioDevicePropertyDeviceUID)
         let name = propString(d, kAudioObjectPropertyName)
-        let idx = engineIndex(from: uid)
+        let usb = isUSBDevice(d)
         if channels(d, kAudioObjectPropertyScopeOutput) > 0 {
-            result.append(AudioDev(id: d, name: name, uid: uid, index: idx, isInput: false))
+            result.append(AudioDev(id: d, name: name, uid: uid,
+                                   index: engineIndex(from: uid, isInput: false),
+                                   isInput: false, isUSB: usb))
         }
         if channels(d, kAudioObjectPropertyScopeInput) > 0 {
-            result.append(AudioDev(id: d, name: name, uid: uid, index: idx, isInput: true))
+            result.append(AudioDev(id: d, name: name, uid: uid,
+                                   index: engineIndex(from: uid, isInput: true),
+                                   isInput: true, isUSB: usb))
         }
     }
     return result
@@ -312,7 +335,7 @@ func colorName(_ c: Int) -> String {
 /// Connection Type → 是否光纤。Hackintool `gPinConnector`：5 = Optical
 func isOptical(_ connector: Int) -> Bool { connector == 5 }
 
-/// 系统设备名 → HDA device type（用于和 codec 引脚配对）
+/// AppleHDA 设备名 → HDA device type（用于和 codec 引脚配对）
 func hdaDevType(_ name: String, isInput: Bool) -> Int? {
     let n = name.lowercased()
     if isInput {
@@ -331,18 +354,19 @@ func hdaDevType(_ name: String, isInput: Bool) -> Int? {
 
 /// 通用兜底：本机索引表没命中时，从 AppleHDA 给的系统设备名推导
 /// 设备名本身携带类型（Built-in Line Output / Headphone / Microphone…），
-/// 与 CoreAudio 枚举天然一一对应，不需要跨层映射 ⇒ 换任何机器都能显示
+/// 与 CoreAudio 枚举天然一一对应，不需要跨层映射
 /// 缺点：拿不到插孔颜色，颜色列留空
-func derivedColumns(name: String, isInput: Bool) -> (String, String, String, String)? {
-    let n = name.lowercased()
+func derivedColumns(for d: AudioDev) -> (String, String, String, String)? {
+    guard isAppleHDAEngineUID(d.uid, isInput: d.isInput) else { return nil }
+    let n = d.name.lowercased()
     func has(_ k: String) -> Bool { n.contains(k) }
 
-    let pin = pinFor(name: name, isInput: isInput)
+    let pin = pinFor(device: d)
     let color = pin?.color ?? ""
     // Connection Type = Optical 时一定是光纤口，比设备名更可靠
     let optical = isOptical(pin?.connector ?? 0)
 
-    if isInput {
+    if d.isInput {
         if has("digital input") || has("spdif") || optical { return ("数字输入", "←", "SPDIF", color) }
         if has("line input") || has("linein")   { return ("线路输入", "←", "LINE",  color) }
         if has("microphone") || has("mic")      { return ("话筒",     "←", "MIC",   color) }
@@ -362,27 +386,28 @@ func derivedColumns(name: String, isInput: Bool) -> (String, String, String, Str
 ///   · **引脚多于设备** → 取前 N 个（常见于板载没把 REAR / C-SUB 暴露成设备，
 ///     此时排在前面的才是主输出口）
 ///   · 引脚少于设备 → 返回空（无法覆盖，宁可无色也不要张冠李戴）
-func pinFor(name: String, isInput: Bool) -> (color: String, connector: Int)? {
-    guard let dt = hdaDevType(name, isInput: isInput) else { return nil }
+func pinFor(device d: AudioDev) -> (color: String, connector: Int)? {
+    guard isAppleHDAEngineUID(d.uid, isInput: d.isInput),
+          let dt = hdaDevType(d.name, isInput: d.isInput) else { return nil }
     let pins = codecPinColors().filter { $0.devType == dt }
     guard !pins.isEmpty else { return nil }
 
-    // 同一 device type 的 CoreAudio 设备（按显示顺序）
+    // 只在 AppleHDA engines 内按同类型配对；USB / 其它 HAL 设备不属于 codec 插孔。
     let sameType = allAudioDevices()
-        .filter { $0.isInput == isInput && hdaDevType($0.name, isInput: isInput) == dt }
-        .sorted { sortRank(index: $0.index, isInput: isInput) < sortRank(index: $1.index, isInput: isInput) }
+        .filter {
+            isAppleHDAEngineUID($0.uid, isInput: $0.isInput) &&
+            $0.isInput == d.isInput && hdaDevType($0.name, isInput: $0.isInput) == dt
+        }
+        .sorted { sortRank(index: $0.index, isInput: $0.isInput) < sortRank(index: $1.index, isInput: $1.isInput) }
     guard pins.count >= sameType.count,
-          let idx = sameType.firstIndex(where: { $0.name == name }) else { return nil }
+          let idx = sameType.firstIndex(where: { $0.id == d.id }) else { return nil }
     return (pins[idx].color, pins[idx].connector)
-}
-
-func pinColor(for name: String, isInput: Bool) -> String {
-    pinFor(name: name, isInput: isInput)?.color ?? ""
 }
 
 /// 先查本机精确表，查不到再走通用推导
 func columns(for d: AudioDev) -> (String, String, String, String)? {
-    panelColumns(index: d.index, isInput: d.isInput) ?? derivedColumns(name: d.name, isInput: d.isInput)
+    guard isAppleHDAEngineUID(d.uid, isInput: d.isInput) else { return nil }
+    return panelColumns(index: d.index, isInput: d.isInput) ?? derivedColumns(for: d)
 }
 
 func panelLabel(index: Int, isInput: Bool) -> String? {
@@ -596,6 +621,16 @@ func panelHint(index: Int, isInput: Bool) -> String {
         default: return ""
         }
     }
+}
+
+func deviceHint(for d: AudioDev) -> String {
+    if isAppleHDAEngineUID(d.uid, isInput: d.isInput) {
+        let hint = panelHint(index: d.index, isInput: d.isInput)
+        if !hint.isEmpty { return hint }
+    }
+    let kind = d.isInput ? "输入设备" : "输出设备"
+    let transport = d.isUSB ? "USB " : ""
+    return "\(transport)\(kind) · \(d.name)"
 }
 
 // MARK: - 自绘菜单行（用 NSMenuItem.view，点击不关闭菜单）
@@ -919,7 +954,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         v.frame = NSRect(x: 0, y: 0, width: 196, height: 26)   // 与系统菜单项高度一致
         item.view = v
-        item.toolTip = panelHint(index: d.index, isInput: d.isInput)
+        item.toolTip = deviceHint(for: d)
         return item
     }
 
@@ -1117,8 +1152,9 @@ if CommandLine.arguments.contains("--pins") {
     }
     print("\n逐设备推导：")
     for d in allAudioDevices() {
-        let derived = derivedColumns(name: d.name, isInput: d.isInput)
-        let exact = panelColumns(index: d.index, isInput: d.isInput)
+        let derived = derivedColumns(for: d)
+        let exact = isAppleHDAEngineUID(d.uid, isInput: d.isInput)
+            ? panelColumns(index: d.index, isInput: d.isInput) : nil
         print("  \(d.isInput ? "输入" : "输出") idx=\(d.index)  \(d.name)")
         print("     精确表颜色 = \(exact?.3 ?? "-")   推导颜色 = \(derived?.3 ?? "-")")
     }
