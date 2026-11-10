@@ -636,40 +636,36 @@ func deviceHint(for d: AudioDev) -> String {
 // MARK: - 自绘菜单行（用 NSMenuItem.view，点击不关闭菜单）
 
 final class RowView: NSView {
+    static let rowHeight: CGFloat = 26
+    private static let horizontalInset: CGFloat = 18
+
     var title: NSAttributedString { didSet { needsDisplay = true } }
     let dev: AudioDev
     let onClick: () -> Void
-    private var hover = false { didSet { needsDisplay = true } }
+    var isHovered = false { didSet { needsDisplay = true } }
 
     init(dev: AudioDev, title: NSAttributedString, onClick: @escaping () -> Void) {
         self.dev = dev
         self.title = title
         self.onClick = onClick
-        super.init(frame: .zero)
+        let width = ceil(title.size().width) + 2 * Self.horizontalInset
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: Self.rowHeight))
+        autoresizingMask = .width
         wantsLayer = true
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for t in trackingAreas { removeTrackingArea(t) }
-        addTrackingArea(NSTrackingArea(rect: bounds,
-                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                       owner: self, userInfo: nil))
-    }
-    override func mouseEntered(with e: NSEvent) { hover = true }
-    override func mouseExited(with e: NSEvent)  { hover = false }
     override func mouseDown(with e: NSEvent)    { onClick() }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func draw(_ dirtyRect: NSRect) {
-        if hover {
+        if isHovered {
             NSColor.controlAccentColor.withAlphaComponent(0.08).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 4, yRadius: 4).fill()
         }
         // ★ 普通菜单项的文字有 ~14pt 左边距（勾选槽），view 项没有。
         //   这里补上同样的偏移，才能和「输出设备」标题、底部三项对齐。
-        title.draw(at: NSPoint(x: 18, y: (bounds.height - title.size().height) / 2))
+        title.draw(at: NSPoint(x: Self.horizontalInset, y: (bounds.height - title.size().height) / 2))
     }
 }
 
@@ -679,6 +675,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     let menu = NSMenu()
     var vrefTimer: Timer?
+    private var hoverTimer: Timer?
+    private weak var hoveredRow: RowView? {
+        didSet {
+            guard oldValue !== hoveredRow else { return }
+            oldValue?.isHovered = false
+            hoveredRow?.isHovered = true
+        }
+    }
 
     /// true = 音量条控制输入（麦克风图标），false = 控制输出（喇叭图标）
     var isInputMode: Bool = UserDefaults.standard.bool(forKey: "AudioBar.inputMode") {
@@ -690,6 +694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = makeStatusItem()
         menu.delegate = self
+        menu.autoenablesItems = false  // 自绘设备行和音量行由视图处理点击
         statusItem.menu = menu
 
         // --selftest：延迟 1.5s 再测（NSStatusBar 的布局要等下一轮 runloop，
@@ -787,28 +792,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    func menuWillOpen(_ menu: NSMenu) {
+    func menuNeedsUpdate(_ menu: NSMenu) {
         rebuildMenu()
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            self?.updateDeviceHover()
+        }
+        RunLoop.main.add(timer, forMode: .eventTracking)
+        hoverTimer = timer
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        hoveredRow = nil
+    }
+
+    private func updateDeviceHover() {
+        // 用当前指针位置统一更新高亮，快速跨行时也能清除上一行。
+        let pointer = NSEvent.mouseLocation
+        hoveredRow = menu.items.lazy.compactMap { $0.view as? RowView }.first { row in
+            guard let window = row.window else { return false }
+            let location = row.convert(window.convertPoint(fromScreen: pointer), from: nil)
+            return row.visibleRect.contains(location)
+        }
     }
 
     func rebuildMenu() {
         menu.removeAllItems()
-        let devs = allAudioDevices()
+        let devs = allAudioDevices().sorted {
+            sortRank(index: $0.index, isInput: $0.isInput) < sortRank(index: $1.index, isInput: $1.isInput)
+        }
         let curOut = defaultDevice(false)
         let curIn = defaultDevice(true)
+        let outputs = devs.filter { !$0.isInput }.map { deviceItem($0, current: curOut) }
+        let inputs = devs.filter { $0.isInput }.map { deviceItem($0, current: curIn) }
+        let widestRow = (outputs + inputs).compactMap { $0.view?.frame.width }.max() ?? 0
 
-        menu.addItem(volumeItem())
+        menu.addItem(volumeItem(width: max(196, widestRow)))
         menu.addItem(.separator())
         menu.addItem(header("输出设备"))
-        for d in devs.filter({ !$0.isInput }).sorted(by: { sortRank(index: $0.index, isInput: false) < sortRank(index: $1.index, isInput: false) }) {
-            menu.addItem(deviceItem(d, current: curOut))
-        }
+        outputs.forEach { menu.addItem($0) }
 
         menu.addItem(.separator())
         menu.addItem(header("输入设备"))
-        for d in devs.filter({ $0.isInput }).sorted(by: { sortRank(index: $0.index, isInput: true) < sortRank(index: $1.index, isInput: true) }) {
-            menu.addItem(deviceItem(d, current: curIn))
-        }
+        inputs.forEach { menu.addItem($0) }
 
         menu.addItem(.separator())
         let open = NSMenuItem(title: "声音设置…", action: #selector(openSoundPrefs), keyEquivalent: "")
@@ -833,10 +863,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 音量行：图标(喇叭/麦克风，可点静音) + 滑块 + 百分比
-    private func volumeItem() -> NSMenuItem {
+    private func volumeItem(width: CGFloat) -> NSMenuItem {
         let item = NSMenuItem()
-        let w: CGFloat = 196, h: CGFloat = 34     // 组件整体收窄（原 220）
-        let box = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
+        let h: CGFloat = 34
+        let box = NSView(frame: NSRect(x: 0, y: 0, width: width, height: h))
+        box.autoresizingMask = .width
         let dev = defaultDevice(isInputMode)
         let vol = getVolume(dev, input: isInputMode)
         let muted = getMute(dev, input: isInputMode) ?? false
@@ -859,11 +890,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         volIcon = btn
 
         let pctW: CGFloat = 36
-        let pctX = w - inset - pctW
+        let pctX = width - inset - pctW
         let sx = inset + 22 + gap
         // 滑块和图标同高（22）且同一中心线，避免视觉上不齐
         let slider = NSSlider(frame: NSRect(x: sx, y: (h - 22) / 2,
                                             width: max(20, pctX - gap - sx), height: 22))
+        slider.autoresizingMask = .width
         slider.minValue = 0
         slider.maxValue = 1
         slider.isContinuous = true
@@ -876,6 +908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let pct = NSTextField(labelWithString: canVol ? "\(Int(((vol ?? 0) * 100).rounded()))%" : "—")
         pct.frame = NSRect(x: pctX, y: (h - 15) / 2, width: pctW, height: 15)
+        pct.autoresizingMask = .minXMargin
         pct.alignment = .right
         pct.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         pct.textColor = canVol ? .secondaryLabelColor : .tertiaryLabelColor
@@ -952,7 +985,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let v = RowView(dev: d, title: rowTitle(d, current: current)) { [weak self] in
             self?.selectDeviceDirect(d)
         }
-        v.frame = NSRect(x: 0, y: 0, width: 196, height: 26)   // 与系统菜单项高度一致
         item.view = v
         item.toolTip = deviceHint(for: d)
         return item
@@ -1097,15 +1129,11 @@ if CommandLine.arguments.contains("--disable-autostart") {
 if let ri = CommandLine.arguments.firstIndex(of: "--render") {
     let out = (ri + 1 < CommandLine.arguments.count && !CommandLine.arguments[ri + 1].hasPrefix("--"))
         ? CommandLine.arguments[ri + 1] : "/tmp/audiobar-rows.png"
-    let devs = allAudioDevices()
-    let curOut = defaultDevice(false), curIn = defaultDevice(true)
-    let items: [(NSAttributedString, Bool)] = devs.map { d in
-        let c = columns(for: d) ?? (d.name, "", "", "")
-        return (alignedTitle(c.0, c.1, c.2, c.3, dot: d.id == (d.isInput ? curIn : curOut)), d.isInput)
-    }
-    let rowH: CGFloat = 26, pad: CGFloat = 14, scale: CGFloat = 2
-    let W: CGFloat = 300
-    let H = rowH * CGFloat(items.count) + pad * 2
+    delegate.rebuildMenu()
+    let rows = delegate.menu.items.compactMap { $0.view as? RowView }
+    let rowH = RowView.rowHeight, pad: CGFloat = 14, scale: CGFloat = 2
+    let W = ceil(delegate.menu.size.width)
+    let H = rowH * CGFloat(rows.count) + pad * 2
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
                                pixelsWide: Int(W * scale), pixelsHigh: Int(H * scale),
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
@@ -1116,13 +1144,18 @@ if let ri = CommandLine.arguments.firstIndex(of: "--render") {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     NSColor.white.setFill(); NSRect(x: 0, y: 0, width: W, height: H).fill()
     var y = H - pad - rowH
-    for (att, _) in items {
-        att.draw(at: NSPoint(x: 10, y: y + 5))
+    for row in rows {
+        NSGraphicsContext.saveGraphicsState()
+        let offset = NSAffineTransform()
+        offset.translateX(by: 0, yBy: y)
+        offset.concat()
+        row.draw(row.bounds)
+        NSGraphicsContext.restoreGraphicsState()
         y -= rowH
     }
     NSGraphicsContext.restoreGraphicsState()
     try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
-    print("已渲染 \(items.count) 行 → \(out)")
+    print("已渲染 \(rows.count) 行 → \(out)")
     exit(0)
 }
 
